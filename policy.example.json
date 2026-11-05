@@ -1,0 +1,7 @@
+{
+  "agents": {
+    "Alice": {"may_address": ["Bob", "Carol"]},
+    "Bob":   {"may_address": ["all"]},
+    "Carol": {"may_address": ["Alice", "Bob"]}
+  }
+}

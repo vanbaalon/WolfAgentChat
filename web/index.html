@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Chat</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c2128;--mut:#6b7480;--bd:#dde1e6;--acc:#2f6feb;--warn:#b54708}
+@media (prefers-color-scheme:dark){:root{--bg:#12151a;--card:#1b2027;--fg:#e3e7ec;--mut:#8b95a1;--bd:#2c333c;--acc:#5b9aff;--warn:#f0a35e}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,system-ui,sans-serif}
+[hidden]{display:none!important}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--bd);padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+header h1{font-size:16px;margin:0 4px 0 0}
+input,select,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 8px}
+button{cursor:pointer}button:hover{border-color:var(--acc)}
+#q{width:200px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{cursor:pointer;border-radius:12px;padding:1px 10px;border:1px solid var(--bd);font-size:12px;user-select:none}
+.chip.off{opacity:.35;text-decoration:line-through}
+.conn{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--mut)}.conn::before{content:"";width:8px;height:8px;border-radius:50%;background:#999}
+.conn.on::before{background:#2ea043}.conn.off::before{background:#e5534b}
+#stat{color:var(--mut);font-size:12px}
+.banner{padding:6px 16px;font-size:13px;background:color-mix(in srgb,var(--warn) 18%,var(--card));border-bottom:1px solid var(--bd);color:var(--fg)}
+#claims{font-size:12px;color:var(--mut);padding:4px 16px;background:var(--card);border-bottom:1px solid var(--bd)}
+main{max-width:980px;margin:0 auto;padding:8px 16px 90px}
+#older{text-align:center;margin:8px 0;color:var(--mut);font-size:12px}
+.day{text-align:center;color:var(--mut);font-size:12px;margin:18px 0 8px}
+.gap{text-align:center;color:var(--mut);font-size:11px;margin:6px 0}
+.unseen{display:flex;align-items:center;gap:8px;color:#e5534b;font-size:12px;margin:10px 0}.unseen::before,.unseen::after{content:"";flex:1;border-top:1px solid #e5534b}
+.item.hide{display:none}body.filtered .pre .gap{display:none}
+.row{display:flex;gap:10px;align-items:flex-start;margin:10px 0}.row.reply{margin-left:38px}
+.av{flex:none;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;
+ background:linear-gradient(135deg,var(--c),var(--c2));box-shadow:0 1px 3px rgba(0,0,0,.25);position:relative;overflow:hidden;user-select:none}
+.av svg{position:absolute;inset:0;opacity:.28}.av b{position:relative;text-shadow:0 1px 2px rgba(0,0,0,.35)}
+.row.reply .av{width:30px;height:30px;font-size:12px}.av.sm{width:22px;height:22px;font-size:10px}
+.msg{flex:1;min-width:0;background:color-mix(in srgb,var(--c) 9%,var(--card));border:1px solid color-mix(in srgb,var(--c) 35%,var(--bd));border-radius:4px 14px 14px 14px;padding:8px 14px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.msg.flash{animation:fl 1.6s ease-out}@keyframes fl{from{box-shadow:0 0 0 3px var(--c)}to{box-shadow:0 1px 2px rgba(0,0,0,.06)}}
+.top{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;font-size:12px;color:var(--mut)}.top .tm{margin-left:auto}
+.top a{color:var(--acc)}
+.who{font-weight:700;font-size:14px;color:var(--c)}.subj{font-weight:600;font-size:14px;margin:2px 0}
+.kind{border:1px solid var(--bd);border-radius:4px;padding:0 6px}.k-request{color:#d9822b}.k-result{color:#2ea043}.k-review{color:#a371f7}.k-answer{color:var(--acc)}
+.body{overflow-x:auto}.body pre{background:var(--bg);padding:8px;border-radius:6px;overflow-x:auto}.body table{border-collapse:collapse}.body td,.body th{border:1px solid var(--bd);padding:2px 8px}
+.collapsed .body{max-height:260px;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent);mask-image:linear-gradient(#000 70%,transparent)}
+.body a,.meta a{color:var(--acc)}a.fl{text-decoration:underline dotted}
+.more{border:none;background:none;padding:0;color:var(--acc);font-size:12px}
+.ask{display:inline-block;margin:2px 0 4px;padding:1px 10px;border-radius:12px;font-size:12px;border:1px solid var(--bd)}
+.ask.open{background:#f5d9a8;color:#5a3a00;border-color:#d9822b}.ask.assigned,.ask.taken{background:#dbe8ff;color:#12346b;border-color:#2f6feb}
+.ask.answered{background:#d6f0dc;color:#14501f;border-color:#2ea043}.ask.escalated{background:#fbd5d5;color:#7a1212;border-color:#e5534b;font-weight:700}.ask.closed{opacity:.6}
+@media (prefers-color-scheme:dark){.ask.open{background:#4a3513;color:#f3d49a}.ask.assigned,.ask.taken{background:#17294d;color:#b5ceff}.ask.answered{background:#173a20;color:#a9e2b5}.ask.escalated{background:#4d1717;color:#ffc2c2}}
+.sum{margin:2px 0 6px;padding:4px 10px;border-left:3px solid var(--c);background:color-mix(in srgb,var(--c) 12%,transparent);border-radius:0 6px 6px 0;font-size:13.5px}
+.meta{font-size:12px;color:var(--mut);margin-top:4px}.meta:empty{display:none}
+.reshead{margin:8px 0;color:var(--mut)}.reshead a{color:var(--acc)}.result .pre{font-size:12px;margin-top:14px}.result .pre a{color:var(--acc)}
+/* navigation: first / above / jump to a day / below / latest */
+#nav{position:fixed;right:16px;bottom:14px;z-index:21;display:flex;gap:4px;align-items:center;background:color-mix(in srgb,var(--bg) 85%,transparent);padding:3px;border-radius:20px}
+#nav button{min-width:40px;background:var(--card);box-shadow:0 2px 8px rgba(0,0,0,.15);border-radius:18px;padding:4px 10px;font-size:12.5px;font-variant-numeric:tabular-nums}
+#nav button.new{background:var(--acc);color:#fff;border-color:var(--acc)}
+#datepill{position:fixed;left:50%;transform:translateX(-50%);top:calc(var(--hdr,60px) + 8px);z-index:6;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:2px 12px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);cursor:pointer;transition:opacity .3s}
+#datepill.fade{opacity:0;pointer-events:none}
+#newer{text-align:center;margin:8px 0;color:var(--mut);font-size:12px}#newer a{color:var(--acc)}
+.day{cursor:pointer}.day:hover{color:var(--acc)}
+#cal{right:16px;width:min(420px,calc(100vw - 32px))}
+#cal .go{display:flex;gap:6px;align-items:center;margin:6px 0 10px;flex-wrap:wrap}
+.dayrow{display:grid;grid-template-columns:132px 1fr;gap:8px;align-items:end;padding:4px 2px;border-radius:6px}.dayrow.cur{background:color-mix(in srgb,var(--acc) 10%,transparent)}
+.dayrow .dl{border:none;background:none;text-align:left;padding:0;font-size:13px}.dayrow .dl b{font-weight:600}.dayrow .dl span{color:var(--mut);font-size:12px}
+.hrs{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;height:26px;align-items:end;border-bottom:1px solid var(--grid)}
+.hrs span{display:block;background:var(--s1);border-radius:2px 2px 0 0;min-height:0;cursor:pointer}.hrs span.z{background:none;cursor:default}
+.hrs span:hover{filter:brightness(1.2)}
+.hraxis{grid-column:2;display:flex;justify-content:space-between;font-size:10.5px;color:var(--mut)}
+.panel{position:fixed;top:60px;z-index:20;max-height:calc(100vh - var(--hdr,60px) - 70px);overflow:auto;background:var(--card);border:1px solid var(--bd);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:10px 14px;font-size:13px}
+#snd{right:16px;width:min(440px,calc(100vw - 32px))}#adm{left:16px;right:16px}
+.ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}.ph button{border:none;background:none}
+#snd label{display:block;margin:3px 0}.sl{display:flex;gap:8px;align-items:center;margin:4px 0}.sl span:first-child{width:90px}.sl input{flex:1}
+.eng,.hint{color:var(--mut);font-size:12px;margin:6px 0}
+.ag{display:grid;grid-template-columns:22px minmax(70px,1fr) auto minmax(0,170px) auto auto;gap:6px;align-items:center;margin:4px 0}
+.ag .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ag select{width:100%;min-width:0}#snd .ag label.mute{display:flex;gap:3px;align-items:center;margin:0;font-size:12px}
+.st{margin:8px 0 4px;font-size:12px}#sndlog{font-size:11px;white-space:pre-wrap;max-height:160px;overflow:auto;margin:4px 0}
+details summary{cursor:pointer;font-size:12px;color:var(--mut)}
+#adm .room{margin:6px 0;padding:6px 10px;border:1px solid var(--bd);border-radius:8px}#adm .x{color:#e5534b}
+#adm code{background:var(--bg);padding:2px 6px;border-radius:4px;word-break:break-all;display:block;margin:4px 0}
+/* statistics side panel; series colours are the validated categorical slots, "other" is neutral grey */
+:root{--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#a8a7a0;--good:#0ca30c;--warn:#fab219;--crit:#d03b3b;--grid:#e1e0d9}
+@media (prefers-color-scheme:dark){:root{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#6b6a64;--grid:#2c2c2a}}
+#wrap{display:grid;grid-template-columns:minmax(0,980px) 340px;gap:20px;justify-content:center;padding:0 16px}
+main{max-width:none;margin:0;padding:8px 0 90px;min-width:0}
+/* the panel is fixed beside the chat (positioned over its reserved column), so a very long page cannot carry it away */
+#stats{position:fixed;top:var(--hdr,60px);width:340px;max-height:calc(100vh - var(--hdr,60px) - 56px);overflow:auto;padding:12px 2px 12px;font-size:13px;z-index:3}   /* ends above the navigation row */
+body.nostats #wrap{grid-template-columns:minmax(0,980px)}body.nostats #stats,body.nostats #statslot{display:none}
+@media (max-width:1360px){#wrap{grid-template-columns:minmax(0,980px)}#statslot{display:none}
+ #stats{display:none;position:fixed;right:16px;top:var(--hdr,60px);width:min(360px,calc(100vw - 32px));max-height:calc(100vh - var(--hdr,60px) - 64px);z-index:19;background:var(--bg);border:1px solid var(--bd);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:12px}
+ body.showstats #stats{display:block}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.card h3{font-size:12px;font-weight:600;color:var(--mut);margin:0 0 8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile .v{font-size:26px;font-weight:650;line-height:1.15}.tile .u{font-size:13px;font-weight:500;color:var(--mut)}.tile .l{font-size:12px;color:var(--mut)}
+.num{font-variant-numeric:tabular-nums}
+.seg{display:inline-flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden}.seg button{border:none;border-radius:0;padding:1px 8px;font-size:12px;background:none}
+.seg button.on{background:var(--acc);color:#fff}
+.lead{font-size:13px;margin:0 0 8px}.lead b{font-weight:650}
+.legend{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11.5px;color:var(--mut);margin:0 0 8px}.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.arow{display:grid;grid-template-columns:22px minmax(0,1fr) 48px 44px;gap:2px 8px;align-items:center;padding:5px 4px;border-radius:6px;cursor:pointer}
+.arow:hover{background:color-mix(in srgb,var(--acc) 8%,transparent)}.arow.sel{background:color-mix(in srgb,var(--acc) 14%,transparent)}
+.arow .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.arow .r,.arow .t{text-align:right;font-variant-numeric:tabular-nums}
+.arow .sub{grid-column:2/5;font-size:11.5px;color:var(--mut);display:flex;gap:6px;align-items:center}
+.ahead{display:grid;grid-template-columns:22px minmax(0,1fr) 48px 44px;gap:8px;font-size:11px;color:var(--mut);padding:0 4px 2px}.ahead span:nth-child(n+3){text-align:right}
+.kbar{grid-column:2/5;display:flex;gap:2px;height:8px}.kbar span{display:block;height:8px;min-width:2px}.kbar span:first-child{border-radius:4px 0 0 4px}.kbar span:last-child{border-radius:0 4px 4px 0}.kbar span:only-child{border-radius:4px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.qrow{display:flex;gap:6px;align-items:baseline;padding:3px 0;font-size:12.5px}.qrow a{color:var(--fg);text-decoration:none}.qrow a:hover{text-decoration:underline}
+.tag{font-size:11px;border-radius:4px;padding:0 5px;white-space:nowrap}.tag.crit{background:var(--crit);color:#fff}.tag.warn{background:var(--warn);color:#0b0b0b}.tag.info{border:1px solid var(--bd);color:var(--mut)}
+.chart svg{display:block;width:100%;height:auto}.axis{display:flex;justify-content:space-between;font-size:11px;color:var(--mut);margin-top:3px}
+#tip{position:fixed;z-index:50;pointer-events:none;background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:6px;padding:4px 8px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.2);white-space:pre-line;max-width:320px}
+/* read receipts: ✓ sent, ✓✓ grey seen by some, ✓✓ blue seen by all; acks counted separately */
+:root{--goodtext:#006300}@media (prefers-color-scheme:dark){:root{--goodtext:#0ca30c}}
+.ticks{cursor:default;white-space:nowrap}.tk{font-weight:700;letter-spacing:-3px;margin-right:4px}.tk.t0,.tk.t1{color:var(--mut)}.tk.t2{color:var(--acc)}.ackn.ok{color:var(--goodtext);font-weight:600}
+.foot{font-size:11px;color:var(--mut);text-align:right}
+/* composer (only with the admin token) */
+#composer{position:sticky;bottom:0;z-index:4;padding:8px 0 54px;background:linear-gradient(transparent,var(--bg) 14px)}
+#composer .open{width:100%;text-align:left;color:var(--mut);background:var(--card);padding:9px 12px;border-radius:10px;border:1px solid var(--bd)}
+#composer .locked{font-size:13px}#composer .locked code{font-size:12px}#composer .locked input{width:auto;min-width:240px}
+#composer form{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;box-shadow:0 -2px 14px rgba(0,0,0,.08);display:grid;gap:6px}
+#composer .r1{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px;color:var(--mut)}
+#composer input[type=text],#composer textarea{width:100%}#composer textarea{min-height:90px;resize:vertical;font:13px/1.45 ui-monospace,Menlo,monospace}
+#composer .to{cursor:pointer;border-radius:12px;padding:1px 9px;border:1px solid var(--bd);font-size:12px;user-select:none}#composer .to.on{background:var(--acc);border-color:var(--acc);color:#fff}
+#composer .r3{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+#composer .send{background:var(--acc);color:#fff;border-color:var(--acc);padding:4px 16px}
+#composer .hintc{font-size:11.5px;color:var(--mut)}#composer .err{color:var(--crit);font-size:12px}
+#composer .prev{border:1px dashed var(--bd);border-radius:8px;padding:6px 10px;max-height:220px;overflow:auto}
+.mic.on{background:var(--crit);color:#fff;border-color:var(--crit)}
+.top .rep{color:var(--acc);cursor:pointer}
+#adm .inv{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}#adm .pend{font-size:12px;color:var(--mut);margin:4px 0}
+#adm .pend span{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--bd);border-radius:10px;padding:0 8px;margin:2px 4px 2px 0}
+#adm .danger{margin-top:8px;font-size:12px;color:var(--mut)}#adm .danger button{font-size:12px}
+@media (max-width:600px){#q{width:100%}.top .tm{margin-left:0}}
+</style></head><body>
+<header><h1>Agent Chat</h1>
+<input id="q" type="search" placeholder="search all messages (/)" autocomplete="off">
+<div class="chips" id="who"></div>
+<select id="kind" title="filter by kind"><option value="">all kinds</option></select>
+<label title="show full date and time"><input type="checkbox" id="abs"> absolute times</label>
+<button id="sndbtn" data-act="toggle-snd" title="Sound and voice settings">🔔 Sound</button>
+<button id="statbtn" data-act="toggle-stats" title="Activity statistics">📊 Stats</button>
+<button id="admbtn" data-act="toggle-adm" hidden>Rooms</button>
+<span id="conn" class="conn off" title="live connection to the server">connecting…</span><span id="stat"></span></header>
+<div id="stale" class="banner" hidden>This page is out of date. <button data-act="reload">Reload</button></div>
+<div id="unlock" class="banner" hidden>🔇 The browser blocks sound until you click on the page: click anywhere to enable it.</div>
+<div id="claims"></div>
+<div id="snd" class="panel" hidden></div><div id="adm" class="panel" hidden></div>
+<div id="wrap"><main><div id="older"></div><div id="list"></div><div id="newer"></div><div id="results" hidden></div><div id="composer" hidden></div></main><div id="statslot"></div></div>
+<aside id="stats" aria-label="Activity statistics"></aside>
+<div id="nav"><button data-act="nav-first" title="first message of the board (Home)">⤒</button><button data-act="nav-up" id="nav-up" title="messages above; click for one screen up">↑</button><button data-act="nav-cal" title="jump to a day or time">📅</button><button data-act="nav-down" id="nav-down" title="messages below; click for one screen down">↓</button><button data-act="nav-last" id="nav-last" title="latest message (End)">⤓</button></div>
+<div id="datepill" class="fade" data-act="nav-cal" title="jump to a day or time"></div>
+<div id="tip" hidden></div>
+<div id="cal" class="panel" hidden></div>
+<script>
+"use strict";
+const PAGE_VERSION="5";                       // must match PAGE_VERSION in web.py
+const KINDS=["info","request","claim-note","result","review","answer"];
+const $=id=>document.getElementById(id);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const ls=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}};
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const T=s=>new Date(String(s).replace(" ","T"));
+
+/* ---------- look: colours, avatars ---------- */
+const hsh=n=>{let h=2166136261;for(const c of String(n)){h^=c.charCodeAt(0);h=Math.imul(h,16777619)>>>0}return h>>>0};
+const dark=matchMedia("(prefers-color-scheme:dark)").matches;
+// Ten clearly different hues. Each agent gets one the first time it is seen (its hash picks the preferred
+// slot; a taken slot moves it to the next free one) and keeps it: the map is remembered in this browser.
+const HUES=[212,28,140,282,354,184,322,50,250,100];
+let HUEMAP={};try{HUEMAP=JSON.parse(ls("coordHues")||"{}")}catch(e){}
+function hueOf(n){
+  if(!(n in HUEMAP)){const taken=new Set(Object.values(HUEMAP)),k=hsh(n)%HUES.length;
+    let slot=k;for(let i=0;i<HUES.length;i++){const c=(k+i)%HUES.length;if(!taken.has(c)){slot=c;break}}
+    HUEMAP[n]=slot;ls("coordHues",JSON.stringify(HUEMAP))}
+  return HUES[HUEMAP[n]]}
+const col=n=>`hsl(${hueOf(n)} 62% ${dark?64:44}%)`;
+const col2=n=>`hsl(${(hueOf(n)+32)%360} 68% ${dark?50:56}%)`;
+const ini=n=>{const w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()};
+function pat(n){const k=hsh(n+"p"),c=[];for(let i=0;i<5;i++)c.push(`<circle cx="${(k>>>(i*3))%40}" cy="${(k>>>(i*2+1))%40}" r="${6+(k>>>(i+4))%10}" fill="#fff"/>`);return `<svg viewBox="0 0 40 40">${c.join("")}</svg>`}
+
+/* ---------- Markdown + LaTeX + file links ---------- */
+DOMPurify.addHook("afterSanitizeAttributes",n=>{if(n.tagName==="A"){n.setAttribute("target","_blank");n.setAttribute("rel","noopener noreferrer")}});
+const FEXT="tex|nb|wl|wls|py|md|json|txt|pdf|csv|sqlite|cpp|hpp|png|jpg|jpeg|npz|out|log|sh|html|aux|svg|yml|yaml";
+// a path with a known file extension, or (without one) at least two slashes: "forward/inverse" stays text
+const FRE=new RegExp("(?<![\\w@/.:-])((?:[\\w.~+-]+/)*[\\w~+-][\\w.~+-]*\\.(?:"+FEXT+")|(?:[\\w.~+-]+/){2,}[\\w.~+-]+)(?::\\d+)?(?![\\w/])","gi");
+function fileLinks(html){
+  const t=document.createElement("template");t.innerHTML=html;
+  const w=document.createTreeWalker(t.content,NodeFilter.SHOW_TEXT),nodes=[];
+  while(w.nextNode()){const n=w.currentNode;if(!(n.parentElement&&n.parentElement.closest("a,pre,code,.katex")))nodes.push(n)}
+  for(const n of nodes){
+    const txt=n.nodeValue;FRE.lastIndex=0;let m,last=0,frag=null;
+    while((m=FRE.exec(txt))){
+      const raw=m[0],p=m[1];if(/^[\d.\/]+$/.test(p)||(/^[a-z]+\/[a-z]+$/i.test(p)&&p.length<12))continue;   // 1/2, and/or
+      frag=frag||document.createDocumentFragment();frag.append(txt.slice(last,m.index));
+      const a=document.createElement("a");a.href="/file?path="+encodeURIComponent(p);a.target="_blank";a.rel="noopener noreferrer";a.className="fl";a.textContent=raw;frag.append(a);
+      last=m.index+raw.length}
+    if(frag){frag.append(txt.slice(last));n.replaceWith(frag)}}
+  return t.innerHTML}
+const enc=(t,d)=>[...new TextEncoder().encode((d?"1":"0")+t)].map(b=>b.toString(16).padStart(2,"0")).join("");
+const dec=x=>{const t=new TextDecoder().decode(new Uint8Array(x.match(/../g).map(h=>parseInt(h,16))));return [t.slice(1),t[0]==="1"]};
+function md(src){
+  try{
+    const store=[];
+    let s=src.replace(/```[\s\S]*?```|`[^`\n]*`/g,m=>{store.push(m);return "@@C"+(store.length-1)+"@@"});   // math inside code stays code
+    s=s.replace(/\$\$([\s\S]+?)\$\$/g,(_,t)=>"@@D"+enc(t,1)+"@@").replace(/\\\[([\s\S]+?)\\\]/g,(_,t)=>"@@D"+enc(t,1)+"@@")
+       .replace(/\\\(([\s\S]+?)\\\)/g,(_,t)=>"@@D"+enc(t,0)+"@@").replace(/(^|[^\\$])\$([^\s$](?:[^$\n]*[^\s$])?)\$(?!\d)/g,(m,p,t)=>p+"@@D"+enc(t,0)+"@@");
+    s=s.replace(/@@C(\d+)@@/g,(_,i)=>store[+i]);
+    let h=marked.parse(s,{gfm:true});
+    h=h.replace(/@@D([0-9a-f]+)@@/g,(_,x)=>{const o=dec(x);try{return katex.renderToString(o[0],{displayMode:o[1],throwOnError:false})}catch(e){return esc(o[0])}});
+    return fileLinks(DOMPurify.sanitize(h,{ADD_TAGS:["semantics","annotation"],ADD_ATTR:["encoding"]}));
+  }catch(e){return "<pre>"+esc(src)+"</pre>"}}
+
+/* ---------- message elements, inserted incrementally (never a full re-render) ---------- */
+const ITEMS=new Map();           // id -> {m, el}
+let ORDER=[];                    // loaded ids, ascending
+let FIRST=0,TOTAL=0,ASKS={},ACKS={},READS={},CLAIMS=[],ROOMS=[];
+const off=new Set();let KIND="";
+let lastSeen=+(ls("coordLastSeen")||0),firstUnseen=null,NEWCOUNT=0,TITLE_UNREAD=0;
+let LOADED=false,ANNOUNCE_AFTER=Infinity;   // only messages newer than the board's last id at load time are ever announced
+function rel(d){const s=(Date.now()-d)/1000;if(s<60)return"just now";if(s<3600)return Math.floor(s/60)+" min ago";if(s<86400)return Math.floor(s/3600)+" h ago";return Math.floor(s/86400)+" d ago"}
+function setTime(el){const ts=el.dataset.ts;el.textContent=$("abs").checked?ts:ts.slice(11)+" · "+rel(T(ts))}
+function msgEl(m){
+  const it=document.createElement("div");it.className="item";it.dataset.id=m.id;
+  const long=(m.body||"").length>1800,refs=m.refs||[];
+  it.innerHTML=`<div class="pre"></div><div class="row${m.reply_to?" reply":""}" style="--c:${col(m.sender)};--c2:${col2(m.sender)}">
+   <div class="av" title="${esc(m.sender)}">${pat(m.sender)}<b>${esc(ini(m.sender))}</b></div>
+   <div class="msg${long?" collapsed":""}">
+    <div class="top"><span class="who">${esc(m.sender)}</span><span>→ ${esc((m.recipients||[]).join(", "))}</span>
+     <span class="kind k-${esc(m.kind)}">${esc(m.kind)}</span>
+     <span>#${m.id}${m.reply_to?` · reply to <a href="#" class="jump" data-id="${m.reply_to}">#${m.reply_to}</a>`:""}</span><span class="ticks"></span>${ADM?`<span class="rep" data-act="reply" data-id="${m.id}" title="reply to this message">↩ reply</span>`:""}
+     <span class="tm" data-ts="${esc(m.ts)}" title="${esc(m.ts)}"></span></div>
+    <div class="subj">${esc(m.subject)}</div><div class="askslot"></div>${m.summary?`<div class="sum">${esc(m.summary)}</div>`:""}
+    <div class="body">${md(m.body||"")}</div>
+    ${long?`<button class="more" data-act="more">show more</button>`:""}
+    <div class="meta">${refs.length?"refs: "+refs.map(r=>`<a class="fl" target="_blank" rel="noopener noreferrer" href="/file?path=${encodeURIComponent(r)}">${esc(r)}</a>`).join(", "):""}</div>
+   </div></div>`;
+  setTime(it.querySelector(".tm"));
+  return it}
+function decorate(i){                 // day header, "N min later" gap, "new since last visit" line
+  const id=ORDER[i],it=ITEMS.get(id);if(!it)return;
+  const d=T(it.m.ts),p=i>0?ITEMS.get(ORDER[i-1]).m:null;let h="";
+  if(!p||T(p.ts).toDateString()!==d.toDateString())h+=`<div class="day" data-act="nav-cal" title="jump to another day or time">${esc(d.toDateString())}</div>`;
+  else{const g=(d-T(p.ts))/60000;if(g>=10)h+=`<div class="gap">— ${g<60?Math.round(g)+" min":(g/60).toFixed(1)+" h"} later —</div>`}
+  if(id===firstUnseen)h+=`<div class="unseen">new since your last visit</div>`;
+  it.el.querySelector(".pre").innerHTML=h}
+function audience(m){                 // who a message is for: its named recipients, or for "all" the sender's room mates
+  const rec=(m.recipients||[]).filter(r=>r!=="all"&&r!==m.sender);
+  if(rec.length&&!(m.recipients||[]).includes("all"))return rec;
+  let s=new Set(ROOMS.filter(r=>r.members.some(x=>x.agent===m.sender)).flatMap(r=>r.members.map(x=>x.agent)));
+  if(!s.size)s=new Set(agentNames());                                     // sender in no room: everyone the page knows
+  rec.forEach(x=>s.add(x));s.delete(m.sender);s.delete("Admin");return [...s].sort()}
+const hm5=ts=>ts?String(ts).slice(11,16):"";
+function ticks(el,id,m,k){
+  const t=el.querySelector(".ticks");if(!t)return;const aud=audience(m);if(!aud.length){t.innerHTML="";return}
+  const seen=new Map(((READS[id]||m.seen)||[]).map(x=>[x.agent,x.ts])),acked=new Map(k.map(x=>[x.agent,x.ts]));
+  acked.forEach((ts,a)=>{if(!seen.has(a))seen.set(a,ts)});                // an acknowledgement implies it was seen
+  const ns=aud.filter(a=>seen.has(a)),na=aud.filter(a=>acked.has(a)),miss=aud.filter(a=>!seen.has(a));
+  const cls=ns.length===0?"t0":ns.length<aud.length?"t1":"t2";
+  const showAck=m.kind==="request"||k.length>0;
+  const lines=[ns.length?"Seen by: "+ns.map(a=>a+(seen.get(a)?" ("+hm5(seen.get(a))+")":"")).join(", "):"Not seen by anyone yet",
+    miss.length&&ns.length?"Not yet: "+miss.join(", "):"",
+    showAck?(na.length?"Acknowledged: "+na.map(a=>a+" ("+hm5(acked.get(a))+")").join(", "):"Not acknowledged yet"):""].filter(Boolean);
+  k.filter(x=>x.note).forEach(x=>lines.push(`${x.agent}: “${x.note}”`));
+  t.dataset.tip=lines.join("\n");
+  t.innerHTML=`<span class="tk ${cls}">${ns.length?"✓✓":"✓"}</span>${aud.length>1?`<span class="num">${ns.length}/${aud.length}</span>`:""}`+
+    (showAck?` · <span class="ackn${na.length===aud.length?" ok":""}">ack ${na.length}/${aud.length}</span>`:"")}
+function hydrate(el,id,m){             // per-message parts that change later
+  const a=ASKS[id],s=el.querySelector(".askslot");if(s)s.innerHTML=a?askBadge(a):"";
+  const k=ACKS[id]||m.acks||[];ticks(el,id,m,k);
+  if(!el.classList.contains("result"))el.classList.toggle("hide",off.has(m.sender)||(KIND&&m.kind!==KIND))}   // search results show every match
+function addNew(ms){
+  const list=$("list"),added=[];
+  for(const m of ms){
+    if(ITEMS.has(m.id)||(ORDER.length&&m.id<ORDER[ORDER.length-1]))continue;
+    const el=msgEl(m);ITEMS.set(m.id,{m,el});ORDER.push(m.id);list.appendChild(el);decorate(ORDER.length-1);hydrate(el,m.id,m);added.push(m)}
+  return added}
+function addOld(ms){
+  ms=ms.filter(m=>!ITEMS.has(m.id)&&(!ORDER.length||m.id<ORDER[0]));if(!ms.length)return;
+  const list=$("list"),H0=document.documentElement.scrollHeight,y0=scrollY,frag=document.createDocumentFragment();
+  for(const m of ms){const el=msgEl(m);ITEMS.set(m.id,{m,el});frag.appendChild(el);hydrate(el,m.id,m)}
+  list.insertBefore(frag,list.firstChild);ORDER=ms.map(m=>m.id).concat(ORDER);
+  for(let i=0;i<=ms.length&&i<ORDER.length;i++)decorate(i);
+  scrollTo(0,y0+document.documentElement.scrollHeight-H0)}           // keep what the reader was looking at in place
+function askBadge(a){
+  const age=Math.round((Date.now()-T(a.created))/60000),ag=age<1?"under a minute":age<60?age+" min":(age/60).toFixed(1)+" h";
+  const since=age<1?"just now":ag+" ago";
+  const txt={open:`❓ needs an answer, unclaimed for ${ag}`+(age>=15?" — nobody has taken it":""),
+   assigned:`➡ proposed to ${a.owner} (handover ${a.hops}/2) — waiting for ${a.owner}`,
+   taken:`✋ ${a.owner} will answer (taken ${since})`,answered:`✅ answered by ${a.owner}`,
+   escalated:`⚠ escalated to you — ${a.note||"nobody could answer"}`,closed:"closed by the asker"}[a.status]||a.status;
+  return `<div class="ask ${esc(a.status)}" title="passed on by: ${esc((a.passed||[]).join(", ")||"nobody")}">${esc(txt)}</div>`}
+
+/* ---------- loading: one contiguous slice of the board, live at the newest end or anywhere in history ---------- */
+async function api(url){const r=await fetch(url);const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);if(j.stale)$("stale").hidden=false;return j}
+let BEFORE=0,AFTER=0,LIVEMAX=0;      // messages above / below the loaded slice; newest id already shown or announced
+const TAIL=()=>AFTER===0;            // the slice reaches the newest message, so new ones are appended live
+function bounds(j){if(j.first!==undefined){FIRST=j.first;TOTAL=j.total}}
+const nearBottom=()=>innerHeight+scrollY>=document.documentElement.scrollHeight-120;
+const scrollBottom=()=>scrollTo(0,document.documentElement.scrollHeight);
+const hdrH=()=>parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hdr"))||60;
+function edges(){
+  $("older").innerHTML=!ORDER.length?"No messages yet.":BEFORE>0?`<button data-act="older">Load older messages</button> <span>(${BEFORE.toLocaleString()} earlier)</span>`:"Beginning of the board.";
+  $("newer").innerHTML=TAIL()?"":`<button data-act="newer">Load newer messages</button> <span>(${AFTER.toLocaleString()} later)</span> · <a href="#" data-act="nav-last">jump to the latest</a>`;
+  $("stat").textContent=`${ORDER.length} of ${TOTAL.toLocaleString()} loaded`;navUpdate()}
+const olderBar=edges;
+function clearList(){$("list").innerHTML="";ITEMS.clear();ORDER=[];TOPI=0}
+let LOADING_OLD=false,LOADING_NEW=false,WINDOWING=false,GEN=0;   // GEN changes whenever the slice is replaced: late replies for an old slice are dropped
+async function loadOlder(){
+  if(LOADING_OLD||WINDOWING||!ORDER.length||BEFORE<=0)return false;LOADING_OLD=true;const g=GEN;
+  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&before=${ORDER[0]}&limit=150`);if(g!==GEN)return false;bounds(j);addOld(j.messages);BEFORE=j.messages.length?j.before:0;chips();return j.messages.length>0}
+  catch(e){return false}finally{LOADING_OLD=false;edges()}}
+async function loadNewer(){            // reading history: the next page down (old messages, never announced)
+  if(LOADING_NEW||WINDOWING||TAIL()||!ORDER.length)return false;LOADING_NEW=true;const g=GEN;
+  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&after=${ORDER[ORDER.length-1]}&limit=150`);if(g!==GEN)return false;bounds(j);addNew(j.messages);AFTER=j.messages.length?j.after:0;chips();return j.messages.length>0}
+  catch(e){return false}finally{LOADING_NEW=false;edges()}}
+async function loadWindow(params,how){  // replace the slice. params: "around=ID" | "start=ID" | "at=TS" | "" (the newest); how: bottom|top|start|center
+  WINDOWING=true;const g=++GEN;
+  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&limit=150${params?"&"+params:""}`);if(g!==GEN)return null;bounds(j);
+    clearList();addNew(j.messages);BEFORE=j.before||0;AFTER=j.after||0;if(TAIL()){NEWCOUNT=0;LIVEMAX=Math.max(LIVEMAX,ORDER[ORDER.length-1]||0)}
+    await fetchState();chips();edges();
+    const t=j.target!=null?ITEMS.get(j.target):null;
+    if(how==="bottom"||(!t&&how!=="top"))scrollBottom();
+    else if(how==="top")scrollTo(0,0);
+    else{scrollTo(0,t.el.getBoundingClientRect().top+scrollY-hdrH()-(how==="center"?innerHeight/3:8));if(how==="center")flash(j.target)}
+    navUpdate();return j}
+  catch(e){return null}finally{setTimeout(()=>{WINDOWING=false},400)}}
+let FETCHING=false,AGAIN=false;
+async function fetchNew(){
+  if(!LOADED)return;                                                      // the first load decides where the page starts
+  if(FETCHING){AGAIN=true;return}FETCHING=true;
+  try{let more=true;
+    while(more||AGAIN){AGAIN=false;
+      const j=await api(`/api/messages?v=${PAGE_VERSION}&after=${LIVEMAX}`);bounds(j);more=j.messages.length>=500;
+      if(!j.messages.length)continue;
+      LIVEMAX=j.messages[j.messages.length-1].id;
+      if(TAIL()){const near=nearBottom(),added=addNew(j.messages);if(added.length)onNew(added,near,false)}
+      else{AFTER+=j.messages.length;onNew(j.messages,false,true)}}}       // reading history: count and announce them; they appear on return
+  catch(e){setConn(false)}finally{FETCHING=false;edges()}}
+function onNew(added,wasNear,offscreen){
+  chips();loadStats();
+  if(!offscreen&&wasNear&&!SEARCHING)scrollBottom();else NEWCOUNT+=added.length;
+  if(document.hidden){TITLE_UNREAD+=added.length;document.title=`(${TITLE_UNREAD}) Agent Chat`}
+  markSeen();notify(added);navUpdate()}
+function markSeen(){if(TAIL()&&!document.hidden&&nearBottom()&&ORDER.length){lastSeen=Math.max(lastSeen,ORDER[ORDER.length-1]);ls("coordLastSeen",String(lastSeen))}}
+
+/* ---------- position: what is on screen, counts above/below, the date of what you are reading ---------- */
+let TOPI=0,NAVRAF=0,PILLT=null;
+function onScreen(){                    // indices in ORDER of the first and last message on screen (filtered ones skipped)
+  const vis=[];for(let i=0;i<ORDER.length;i++){const e=ITEMS.get(ORDER[i]).el;if(!e.classList.contains("hide"))vis.push(i)}
+  if(!vis.length)return null;
+  const top=scrollY+hdrH(),bot=scrollY+innerHeight,el=i=>ITEMS.get(ORDER[i]).el;
+  let lo=0,hi=vis.length-1;while(lo<hi){const mid=(lo+hi)>>1,e=el(vis[mid]);if(e.offsetTop+e.offsetHeight<=top)lo=mid+1;else hi=mid}
+  const a=vis[lo];lo=0;hi=vis.length-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(el(vis[mid]).offsetTop<bot)lo=mid;else hi=mid-1}
+  return [a,Math.max(a,vis[lo])]}
+function navUpdate(){
+  if(NAVRAF)return;NAVRAF=requestAnimationFrame(()=>{NAVRAF=0;
+    const r=SEARCHING?null:onScreen(),up=r?BEFORE+r[0]:0,down=r?(ORDER.length-1-r[1])+AFTER:0;
+    $("nav").hidden=SEARCHING||!ORDER.length;
+    $("nav-up").textContent="↑ "+up.toLocaleString();$("nav-up").title=`${up.toLocaleString()} message${up===1?"":"s"} above; click for one screen up`;
+    $("nav-down").textContent="↓ "+down.toLocaleString();$("nav-down").title=`${down.toLocaleString()} message${down===1?"":"s"} below; click for one screen down`;
+    const nl=$("nav-last");nl.textContent=NEWCOUNT?`⤓ ${NEWCOUNT} new`:"⤓";nl.classList.toggle("new",NEWCOUNT>0);
+    if(r){const m=ITEMS.get(ORDER[r[0]]).m,d=T(m.ts);$("datepill").textContent=d.toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"})+" · "+m.ts.slice(11,16);CURDAY=m.ts.slice(0,10)}
+})}
+function showPill(){const p=$("datepill");if(SEARCHING||!ORDER.length)return;p.classList.remove("fade");clearTimeout(PILLT);PILLT=setTimeout(()=>p.classList.add("fade"),1500)}
+
+async function fetchState(){
+  try{const j=await api("/api/state?since="+(ORDER.length?ORDER[0]:0));
+    ASKS={};(j.asks||[]).forEach(a=>ASKS[a.msg]=a);ACKS=j.acks||{};READS=j.reads||{};CLAIMS=j.claims||[];ROOMS=j.rooms||[];
+    if(j.version&&j.version!==PAGE_VERSION)$("stale").hidden=false;
+    if(j.coord_cmd)COORD_CMD=j.coord_cmd;
+    for(const [id,{m,el}] of ITEMS)hydrate(el,id,m);
+    document.querySelectorAll("#results .item").forEach(el=>{const id=+el.dataset.id,m=(RESULTS.get(id)||{});hydrate(el,id,m)});
+    $("claims").innerHTML=CLAIMS.length?"Active claims: "+CLAIMS.map(c=>`<b style="color:${col(c.agent)}">${esc(c.agent)}</b>: ${esc(c.item)}`).join(" · "):"No active claims";
+    if(ADM&&!$("adm").hidden&&!$("adm").contains(document.activeElement))admRender();
+    chips();loadStats()}catch(e){}}
+let ES=null;
+function setConn(ok){const c=$("conn");c.className="conn "+(ok?"on":"off");c.textContent=ok?"live":"reconnecting…"}
+let LASTEV=Date.now();
+function connectStream(){
+  if(!window.EventSource)return;
+  if(ES)ES.close();ES=new EventSource("/api/stream");LASTEV=Date.now();
+  const seen=()=>{LASTEV=Date.now();setConn(true)};
+  ES.addEventListener("msg",()=>{seen();fetchNew()});ES.addEventListener("state",()=>{seen();fetchState()});ES.addEventListener("ping",seen);
+  ES.onopen=seen;ES.onerror=()=>setConn(false)}                         // EventSource also reconnects by itself
+setInterval(()=>{if(ES&&Date.now()-LASTEV>40000)connectStream()},10000); // the server pings every 15 s: silence means a dead connection
+
+/* ---------- filters, search, jumping ---------- */
+let CHIPSIG="";
+function agentNames(){const s=new Set();for(const {m} of ITEMS.values())s.add(m.sender);ROOMS.forEach(r=>r.members.forEach(x=>s.add(x.agent)));return [...s].sort()}
+function chips(){
+  const names=[...new Set([...ITEMS.values()].map(x=>x.m.sender))].sort(),kinds=[...new Set(KINDS.concat([...ITEMS.values()].map(x=>x.m.kind)))];
+  const sig=names.join("|")+"#"+kinds.join("|")+"#"+[...off].join("|");if(sig===CHIPSIG)return;
+  const newAgent=names.some(n=>!CHIPSIG.includes(n));CHIPSIG=sig;
+  $("who").innerHTML=names.map(n=>`<span class="chip${off.has(n)?" off":""}" style="border-color:${col(n)};color:${col(n)}" data-act="chip" data-n="${esc(n)}" title="show or hide ${esc(n)}">${esc(n)}</span>`).join("");
+  $("kind").innerHTML='<option value="">all kinds</option>'+kinds.map(k=>`<option${k===KIND?" selected":""}>${esc(k)}</option>`).join("");
+  if(newAgent)loadVoices()}
+function applyFilters(){document.body.classList.toggle("filtered",off.size>0||!!KIND);for(const [id,{m,el}] of ITEMS)hydrate(el,id,m)}
+let SEARCHING=false,SEARCH_T=null;const RESULTS=new Map();
+async function runSearch(){
+  const q=$("q").value.trim();
+  if(!q){SEARCHING=false;$("results").hidden=true;$("list").hidden=false;$("older").hidden=false;$("newer").hidden=false;$("results").innerHTML="";RESULTS.clear();navUpdate();return}
+  let j;try{j=await api("/api/search?q="+encodeURIComponent(q))}catch(e){return}
+  if($("q").value.trim()!==q)return;                                     // a newer search is on its way
+  SEARCHING=true;$("list").hidden=true;$("older").hidden=true;$("newer").hidden=true;const r=$("results");r.hidden=false;RESULTS.clear();navUpdate();
+  r.innerHTML=`<div class="reshead">${j.messages.length}${j.messages.length>=200?"+":""} message${j.messages.length===1?"":"s"} in the whole history match “${esc(q)}”, newest first · <a href="#" data-act="clearsearch">back to the chat</a></div>`;
+  for(const m of j.messages){const el=msgEl(m);el.classList.add("result");RESULTS.set(m.id,m);
+    el.querySelector(".pre").innerHTML=`<a href="#" class="jump" data-id="${m.id}">show in the chat ↗</a>`;hydrate(el,m.id,m);r.appendChild(el)}
+  scrollTo(0,0)}
+function clearSearch(){$("q").value="";runSearch()}
+async function jump(id){                // a message anywhere in the history: open the slice around it if needed
+  if(SEARCHING)clearSearch();
+  if(!ITEMS.has(id))await loadWindow("around="+id,"center");
+  const it=ITEMS.get(id);if(!it)return;
+  if(it.el.classList.contains("hide")){off.clear();KIND="";FOCUS_AGENT=null;chips();applyFilters()}
+  scrollTo(0,it.el.getBoundingClientRect().top+scrollY-innerHeight/3);flash(id);navUpdate()}
+async function jumpLatest(){if(SEARCHING)clearSearch();if(TAIL())scrollBottom();else await loadWindow("","bottom");NEWCOUNT=0;navUpdate()}
+async function jumpFirst(){if(SEARCHING)clearSearch();if(BEFORE===0)scrollTo(0,0);else await loadWindow("start="+FIRST,"top");navUpdate()}
+async function jumpTime(ts){if(SEARCHING)clearSearch();$("cal").hidden=true;await loadWindow("at="+encodeURIComponent(ts),"start")}
+/* the date navigator: every day with its messages per hour; click a day or an hour */
+let CURDAY="",DAYS=null;
+async function calRender(){
+  const c=$("cal");
+  c.innerHTML=`<div class="ph"><b>Jump to a day or time</b><button data-act="close-panel" title="close">✕</button></div><div class="l">loading…</div>`;
+  try{DAYS=(await api("/api/days")).days}catch(e){c.querySelector(".l").textContent="Could not load the days: "+e.message;return}
+  const now=new Date(),loc=new Date(now-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  c.innerHTML=`<div class="ph"><b>Jump to a day or time</b><button data-act="close-panel" title="close">✕</button></div>
+   <div class="go"><input type="datetime-local" id="cal-at" value="${esc(CURDAY?CURDAY+"T09:00":loc)}"> <button data-act="cal-go">Go</button>
+     <button data-act="nav-first">⤒ first message</button> <button data-act="nav-last">⤓ latest</button></div>
+   ${DAYS.map(d=>{const mx=Math.max(1,...d.hours),dt=new Date(d.day+"T12:00");
+     return `<div class="dayrow${d.day===CURDAY?" cur":""}"><button class="dl" data-act="cal-day" data-day="${d.day}" title="go to the start of this day"><b>${esc(dt.toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"}))}</b> <span class="num">${d.n.toLocaleString()} msgs</span></button>
+     <div class="hrs">${d.hours.map((n,h)=>{const hh=String(h).padStart(2,"0");return n?`<span data-act="cal-hour" data-at="${d.day} ${hh}:00:00" style="height:${Math.max(8,100*n/mx)}%" data-tip="${esc(`${hh}:00–${String((h+1)%24).padStart(2,"0")}:00 · ${n} message${n===1?"":"s"}`)}"></span>`:`<span class="z"></span>`}).join("")}</div></div>`}).join("")}
+   <div class="dayrow"><span></span><div class="hraxis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div></div>`}
+function flash(id){const it=ITEMS.get(id);if(!it)return;const m=it.el.querySelector(".msg");m.classList.remove("flash");void m.offsetWidth;m.classList.add("flash")}
+
+/* ---------- sound: tune per agent (WebAudio) + read-aloud audio rendered by the server ---------- */
+let SET={sound:false,speak:false,vol:.6,rate:1,muted:[]};
+try{Object.assign(SET,JSON.parse(ls("coordSet")||"{}"))}catch(e){}
+if(!Array.isArray(SET.muted))SET.muted=[];SET.vol=Math.max(0,Math.min(1,+SET.vol||.6));SET.rate=Math.max(.6,Math.min(1.8,+SET.rate||1));
+function saveSet(){ls("coordSet",JSON.stringify(SET));$("sndbtn").textContent=(SET.sound?"🔊":"🔔")+(SET.speak?" 🗣":"")+" Sound"}
+let LOG=[],STATUS="";
+function dlog(s){LOG.push(new Date().toTimeString().slice(0,8)+" "+s);if(LOG.length>80)LOG.shift();const e=$("sndlog");if(e)e.textContent=LOG.join("\n")}
+function setStatus(s){STATUS=s;const e=$("sndstat");if(e)e.textContent=s}
+let AC=null;
+function unlockAudio(){
+  try{if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume()}catch(e){}
+  if(BLOCKED){BLOCKED=false;$("unlock").hidden=true;dlog("sound enabled by a click");pump()}}
+["pointerdown","keydown","touchend"].forEach(ev=>addEventListener(ev,unlockAudio,{passive:true,capture:true}));
+const SCALE=[0,2,4,7,9,12,14,16];
+function chimeNow(name,kind){
+  if(!AC||AC.state!=="running")return false;
+  const k=hsh(name),base=220*Math.pow(2,(k%12)/12)*(k%3?1:.5)*2,wave=["sine","triangle","square","sawtooth"][(k>>>4)%4],
+        motif=[0,1,2].map(i=>SCALE[(k>>>(8+i*3))%SCALE.length]);if(kind==="request")motif.push(motif[0]+12);
+  const t0=AC.currentTime+.02,v=SET.vol*(wave==="square"||wave==="sawtooth"?.12:.3);
+  motif.forEach((st,i)=>{const o=AC.createOscillator(),g=AC.createGain(),t=t0+i*.13;o.type=wave;o.frequency.value=base*Math.pow(2,st/12);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+.26);o.connect(g).connect(AC.destination);o.start(t);o.stop(t+.3)});
+  return true}
+// One <audio> element per tab and a plain first-in-first-out queue. Nothing here is shared with other tabs.
+const AUD=new Audio();AUD.preload="auto";
+let Q=[],CUR=null,BLOCKED=false;
+let VOICES={engine:null,voices:[],assign:{}};
+const ttsURL=p=>"/tts?"+new URLSearchParams(Object.assign({},p,{voice:(VOICES.assign||{})[p.agent]||"",rate:(+SET.rate).toFixed(1)}));
+function enqueue(it,front){
+  if(front)Q.unshift(it);else{Q.push(it);const extra=Q.length-4;if(extra>0){Q.splice(0,extra);dlog(`dropped ${extra} older announcement(s): too many waiting`)}}
+  pump()}
+async function pump(){
+  if(CUR||BLOCKED||!Q.length)return;const it=Q.shift();CUR=it;
+  if(Q[0]&&Q[0].url&&!Q[0].pre){Q[0].pre=1;fetch(Q[0].url).catch(()=>{})}   // let the server render the next one meanwhile
+  try{if(it.chime&&SET.sound&&chimeNow(it.chime,it.kind))await sleep(it.url?600:400);
+      if(it.url&&!it.cancelled)await playURL(it)}
+  catch(e){dlog("error: "+e.message)}
+  finally{CUR=null;pump()}}
+function playURL(it){return new Promise(res=>{
+  let done=false,timer=null;
+  const fin=why=>{if(done)return;done=true;clearTimeout(timer);AUD.onended=AUD.onerror=AUD.onloadedmetadata=AUD.onplaying=null;dlog(it.label+": "+why);res(why)};
+  it.stop=()=>{AUD.pause();fin("stopped")};
+  AUD.onended=()=>{setStatus(it.label+": finished");fin("finished")};
+  AUD.onerror=()=>{setStatus(it.label+": the server could not produce the audio");fin("audio error "+(AUD.error?AUD.error.code:""))};
+  AUD.onloadedmetadata=()=>{clearTimeout(timer);const d=isFinite(AUD.duration)?AUD.duration:60;
+    timer=setTimeout(()=>{AUD.pause();setStatus(it.label+": playback stalled");fin("stalled")},d*1000+10000)};
+  AUD.onplaying=()=>setStatus(it.label+": playing");
+  timer=setTimeout(()=>{AUD.pause();setStatus(it.label+": the audio took too long to arrive");fin("timeout")},45000);
+  AUD.volume=SET.vol;AUD.src=it.url;setStatus(it.label+": preparing…");dlog(it.label+": requested");
+  const p=AUD.play();
+  if(p&&p.catch)p.catch(e=>{
+    if(e.name==="NotAllowedError"){BLOCKED=true;Q.unshift(it);$("unlock").hidden=false;setStatus("Sound is blocked until you click on the page");fin("blocked: waiting for a click")}
+    else if(e.name==="AbortError")fin("aborted");
+    else{setStatus(it.label+": could not play ("+e.name+")");fin("play failed: "+e.name)}})})}
+function stopAll(){Q=[];if(CUR){CUR.cancelled=true;CUR.stop&&CUR.stop()}setStatus("stopped")}
+function testVoice(agent){unlockAudio();const it={url:ttsURL({agent,test:1}),label:"test "+agent};
+  if(CUR){CUR.cancelled=true;CUR.stop&&CUR.stop()}enqueue(it,true)}
+// When several tabs are open, each message is announced by exactly one of them (Web Locks make the claim atomic).
+// A visible tab gets the first chance; a tab that was never clicked cannot play sound, so it never claims.
+const canPlay=()=>!navigator.userActivation||navigator.userActivation.hasBeenActive;
+async function claim(id){
+  if(document.visibilityState!=="visible")await sleep(4500);
+  const take=()=>{try{const s=JSON.parse(localStorage.getItem("coordSpoken")||"[]");if(s.includes(id))return false;s.push(id);localStorage.setItem("coordSpoken",JSON.stringify(s.slice(-400)));return true}catch(e){return true}};
+  try{return navigator.locks?await navigator.locks.request("coord-spoken",take):take()}catch(e){return take()}}
+async function notify(ms){
+  ms.forEach(m=>flash(m.id));
+  if(!SET.sound&&!SET.speak)return;
+  let todo=ms.filter(m=>m.id>ANNOUNCE_AFTER&&!SET.muted.includes(m.sender));if(!todo.length)return;
+  if(todo.length>3){dlog(`${todo.length} new messages at once: reading the latest 2`);todo=todo.slice(-2)}
+  if(!canPlay()){$("unlock").hidden=false;dlog(`${todo.length} new message(s) not announced: click the page once to allow sound`);return}
+  const ok=await Promise.all(todo.map(m=>claim(m.id)));
+  todo.forEach((m,i)=>{if(!ok[i]){dlog(`#${m.id} announced by another tab`);return}
+    enqueue({chime:SET.sound?m.sender:null,kind:m.kind,url:SET.speak&&VOICES.engine?ttsURL({msg:m.id,agent:m.sender}):null,label:`#${m.id} ${m.sender}`})})}
+let VLOADING=false,VAGAIN=false;
+async function loadVoices(){                    // one request at a time; the server answers at once, "pending" while it checks voices
+  if(VLOADING){VAGAIN=true;return}VLOADING=true;
+  try{do{VAGAIN=false;const r=await fetch("/api/voices?agents="+encodeURIComponent(JSON.stringify(agentNames())));
+      if(r.ok){const j=await r.json();VOICES=j;if(j.pending)await sleep(1500),VAGAIN=true}}while(VAGAIN)}catch(e){}
+  finally{VLOADING=false}
+  if(!$("snd").hidden)sndRender()}
+async function setVoice(agent,voice){
+  try{const r=await fetch("/api/voice",{method:"POST",headers:{"Content-Type":"application/json","X-Coord":"1"},body:JSON.stringify({agent,voice})});
+    if(!r.ok)throw new Error((await r.json()).error);VOICES.assign[agent]=voice;testVoice(agent)}catch(e){setStatus("could not change the voice: "+e.message)}}
+function sndRender(){
+  const names=agentNames(),vs=VOICES.voices||[];
+  const opts=a=>vs.map(v=>`<option value="${esc(v.name)}"${(VOICES.assign||{})[a]===v.name?" selected":""}>${esc(v.name)} · ${esc(v.lang)}${v.gender==="f"?" · woman":v.gender==="m"?" · man":""}</option>`).join("");
+  $("snd").innerHTML=`<div class="ph"><b>Sound for new messages</b><button data-act="close-panel" title="close">✕</button></div>
+   <label><input type="checkbox" data-set="sound"${SET.sound?" checked":""}> Play a short tune (one per agent)</label>
+   <label><input type="checkbox" data-set="speak"${SET.speak?" checked":""}${VOICES.engine?"":" disabled"}> Read aloud: who, message type, headline and summary (never the long body)</label>
+   <div class="sl"><span>Volume</span><input type="range" min="0" max="1" step="0.05" value="${SET.vol}" data-set="vol"></div>
+   <div class="sl"><span>Speech rate</span><input type="range" min="0.6" max="1.8" step="0.1" value="${SET.rate}" data-set="rate"><span id="ratev">${(+SET.rate).toFixed(1)}×</span></div>
+   <div class="eng">${VOICES.engine?`${vs.length} voices, rendered by the server (${esc(VOICES.engine)}). Every tab and browser uses the same voice for an agent.`:"Read-aloud is unavailable: the server has no speech engine (macOS say, or install espeak-ng)."}</div>
+   ${names.map(n=>`<div class="ag"><span class="av sm" style="--c:${col(n)};--c2:${col2(n)}"><b>${esc(ini(n))}</b></span><span class="n" style="color:${col(n)}" title="${esc(n)}">${esc(n)}</span>
+     <button data-act="snd-chime" data-agent="${esc(n)}" title="play ${esc(n)}'s tune">♪</button>
+     <select data-voice="${esc(n)}" title="voice of ${esc(n)}"${vs.length?"":" disabled"}>${opts(n)}</select>
+     <button data-act="snd-test" data-agent="${esc(n)}" title="hear ${esc(n)}'s voice"${vs.length?"":" disabled"}>🗣</button>
+     <label class="mute" title="no tune or voice for ${esc(n)}"><input type="checkbox" data-mute="${esc(n)}"${SET.muted.includes(n)?" checked":""}>mute</label></div>`).join("")}
+   <div id="sndstat" class="st">${esc(STATUS)}</div><button data-act="snd-stop">Stop speaking</button>
+   <details><summary>Diagnostics</summary><pre id="sndlog">${esc(LOG.join("\n"))}</pre><button data-act="snd-copy">Copy</button></details>
+   <div class="hint">The browser allows sound only after you have clicked on the page once. With several tabs open, each message is read by one tab only (a visible one first).</div>`}
+
+/* ---------- writing to the room (needs the admin token) ---------- */
+const CMP={open:false,to:new Set(["all"]),reply:null,preview:false};
+let ADM_BAD=false;
+function composerRender(focus){
+  const c=$("composer");c.hidden=false;document.body.classList.toggle("composing",true);
+  if(!ADM){c.innerHTML=`<div class="open locked">✍ <b>To write to the room</b>, paste your admin link (it ends in <code>#admin=…</code>):
+     <input type="text" id="admlink" placeholder="http://127.0.0.1:8780/#admin=…" size="34"> <button data-act="adm-link">Unlock</button>
+     <span class="err" id="admerr">${ADM_BAD?"Your saved admin link is out of date: paste the current one.":""}</span>
+     <div class="hintc">The chat server prints it when it starts. Ask any agent: <i>“give me the agent chat admin link”</i>. Keep it private.</div></div>`;return}
+  if(!CMP.open){c.innerHTML=`<button class="open" data-act="cmp-open">✍ Write to the room…</button>`;return}
+  const names=agentNames().filter(n=>n!=="Admin"),me=ls("coordMe")||"User",keep=id=>{const e=$(id);return e?e.value:""};
+  const v={subject:keep("cmp-subject"),summary:keep("cmp-summary"),body:keep("cmp-body"),kind:keep("cmp-kind")||"info"};
+  if(CMP.prefill){Object.assign(v,CMP.prefill);CMP.prefill=null}
+  c.innerHTML=`<form id="cmp" autocomplete="off">
+   <div class="r1">From <input type="text" id="cmp-me" value="${esc(me)}" size="10" style="width:auto">
+     to <span class="to${CMP.to.has("all")?" on":""}" data-act="cmp-to" data-n="all">everyone</span>${names.map(n=>`<span class="to${CMP.to.has(n)?" on":""}" data-act="cmp-to" data-n="${esc(n)}">${esc(n)}</span>`).join("")}
+     <select id="cmp-kind">${["info","request","answer","result","review"].map(k=>`<option${k===v.kind?" selected":""}>${k}</option>`).join("")}</select>
+     ${CMP.reply?`<span>replying to <a href="#" class="jump" data-id="${CMP.reply}">#${CMP.reply}</a> <span class="x" data-act="cmp-noreply" style="cursor:pointer" title="not a reply">✕</span></span>`:""}
+     <span style="margin-left:auto"><button type="button" data-act="cmp-close" title="close (Esc)">✕</button></span></div>
+   <input type="text" id="cmp-subject" placeholder="Headline (required)" value="${esc(v.subject)}" maxlength="200">
+   <input type="text" id="cmp-summary" placeholder="Short summary, one or two plain sentences (read aloud)" value="${esc(v.summary)}" maxlength="300">
+   <textarea id="cmp-body" placeholder="Message: Markdown and LaTeX ($x^2$, $$…$$) are fine">${esc(v.body)}</textarea>
+   ${CMP.preview?`<div class="prev body">${md(v.body)||"<i>nothing to preview</i>"}</div>`:""}
+   <div class="r3"><span class="hintc">${$("cmp-kind")&&false?"":""}${CMP.to.has("all")?"to everyone":"to "+[...CMP.to].join(", ")}${v.kind==="request"&&CMP.to.has("all")?" · a request to everyone must be answered by one agent":""}</span>
+     <span><span class="err" id="cmp-err"></span>
+     ${window.SpeechRecognition||window.webkitSpeechRecognition?`<button type="button" class="mic${REC?" on":""}" data-act="cmp-mic" title="dictate into the focused field; Chrome sends the audio to its online speech service">${REC?"● listening":"🎤 dictate"}</button>`:""}
+     <button type="button" data-act="cmp-preview">${CMP.preview?"edit":"preview"}</button>
+     <button type="submit" class="send" title="send (⌘/Ctrl+Enter)">Send</button></span></div></form>`;
+  if(focus)$(focus).focus()}
+async function composerSend(){
+  const me=$("cmp-me").value.trim()||"User";ls("coordMe",me);
+  const d={sender:me,to:[...CMP.to],kind:$("cmp-kind").value,subject:$("cmp-subject").value,summary:$("cmp-summary").value,body:$("cmp-body").value,reply_to:CMP.reply};
+  try{const r=await fetch("/api/post",{method:"POST",headers:{"X-Admin-Token":ADM,"Content-Type":"application/json"},body:JSON.stringify(d)});
+    const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);
+    CMP.open=false;CMP.reply=null;CMP.preview=false;stopDictation();composerRender();await fetchNew();scrollBottom()}
+  catch(e){const el=$("cmp-err");if(el)el.textContent=e.message}}
+let REC=null,REC_FIELD="cmp-body";
+function stopDictation(){if(REC){try{REC.stop()}catch(e){}REC=null}}
+function dictate(){
+  if(REC){stopDictation();composerRender();return}
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;
+  REC=new SR();REC.continuous=true;REC.interimResults=false;REC.lang=navigator.language||"en-GB";
+  REC.onresult=e=>{const f=$(REC_FIELD)||$("cmp-body");if(!f)return;for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal){const t=e.results[i][0].transcript.trim();f.value+=(f.value&&!/\s$/.test(f.value)?" ":"")+t}};
+  REC.onend=()=>{REC=null;composerRender()};REC.onerror=e=>{const el=$("cmp-err");if(el)el.textContent="dictation: "+e.error};
+  try{REC.start()}catch(e){REC=null}composerRender()}
+document.addEventListener("focusin",e=>{if(["cmp-subject","cmp-summary","cmp-body"].includes(e.target.id))REC_FIELD=e.target.id});
+document.addEventListener("submit",e=>{if(e.target.id==="cmp"){e.preventDefault();composerSend()}});
+
+/* ---------- statistics side panel ---------- */
+const KCOL={result:"var(--s1)",request:"var(--s2)",answer:"var(--s3)",review:"var(--s4)",other:"var(--s5)"};
+const KORDER=["result","request","answer","review","other"];
+let STATWIN=ls("coordStatWin")||"24h",STATS=null,STAT_T=0,STAT_PENDING=false,FOCUS_AGENT=null;
+async function loadStats(force){
+  if(!force&&Date.now()-STAT_T<8000){if(!STAT_PENDING){STAT_PENDING=true;setTimeout(()=>{STAT_PENDING=false;loadStats(true)},8000-(Date.now()-STAT_T))}return}
+  STAT_T=Date.now();
+  try{STATS=await api("/api/stats?window="+encodeURIComponent(STATWIN));renderStats()}
+  catch(e){if(!STATS)$("stats").innerHTML=`<div class="card"><h3>Statistics</h3><div class="l">Could not load the statistics (${esc(e.message)}).</div><button data-act="stats-retry">Retry</button></div>`}}
+const ago=ts=>{const s=(Date.now()-T(ts))/1000;return s<90?"just now":s<3600?Math.round(s/60)+" min ago":s<86400?(s/3600).toFixed(s<36000?1:0)+" h ago":Math.round(s/86400)+" d ago"};
+const winName={"1h":"last hour","24h":"last 24 h","7d":"last 7 days","all":"all time"};
+function hourChart(h){
+  const W=300,H=64,band=W/h.length,bw=band-2,max=Math.max(1,...h.map(x=>x.n)),r=3;
+  const bars=h.map((x,i)=>{const bh=x.n?Math.max(2,x.n/max*(H-4)):0,x0=i*band+1,y=H-bh,last=i===h.length-1;
+    const path=bh?`<path d="M${x0},${H}V${y+Math.min(r,bh)}Q${x0},${y} ${x0+r},${y}H${x0+bw-r}Q${x0+bw},${y} ${x0+bw},${y+Math.min(r,bh)}V${H}Z" fill="var(--s1)"${last?' opacity=".5"':""}/>`:"";
+    const t=`${x.hour.slice(11)}–${String((+x.hour.slice(11,13)+1)%24).padStart(2,"0")}:00 · ${x.n} message${x.n===1?"":"s"}${last?" (this hour so far)":""}`;
+    return path+`<rect x="${i*band}" y="0" width="${band}" height="${H}" fill="transparent" data-tip="${esc(t)}"/>`}).join("");
+  return `<svg viewBox="0 0 ${W} ${H+1}" role="img" aria-label="messages per hour, last 24 hours, peak ${max}"><line x1="0" x2="${W}" y1="${H+.5}" y2="${H+.5}" stroke="var(--grid)"/>${bars}</svg>
+   <div class="axis"><span>24 h ago</span><span>12 h ago</span><span>now</span></div>`}
+function kindBar(k,total){
+  return `<div class="kbar">${KORDER.filter(x=>k[x]).map(x=>`<span style="flex:${k[x]};background:${KCOL[x]}" data-tip="${esc(`${x}: ${k[x]} (${Math.round(100*k[x]/total)}%)`)}"></span>`).join("")}</div>`}
+let STATS_HTML="",STATS_HOVER=false,STATS_DIRTY=false;
+function renderStats(){
+  if(STATS_HOVER){STATS_DIRTY=true;return}                                // redrawn when the pointer leaves the panel
+  const j=STATS;if(!j)return;
+  const p=j.pace,d=p.last60-p.prev60,dTxt=p.prev60||p.last60?`${d>0?"▲":d<0?"▼":"■"} ${Math.abs(d)} vs the hour before`:"no messages in the last two hours";
+  const ag=j.agents,top=ag[0]&&ag[0].kinds.result?ag[0]:null,tot=KORDER.reduce((o,k)=>(o[k]=ag.reduce((s,a)=>s+a.kinds[k],0),o),{});
+  const live=a=>{const m=(Date.now()-T(a.last))/60000;return m<=15?["var(--good)","active"]:m<=120?["var(--warn)","idle"]:["var(--s5)","quiet"]};
+  const rp=j.replies,asks=j.asks||[];
+  const html=`
+  <div class="card"><h3>Pace</h3><div class="tiles">
+    <div class="tile"><div class="v num">${p.last60}<span class="u"> /h</span></div><div class="l">messages in the last 60 min</div><div class="l">${dTxt}</div></div>
+    <div class="tile"><div class="v num">${p.last10*6}<span class="u"> /h</span></div><div class="l">current pace (last 10 min: ${p.last10})</div><div class="l">${p.total} messages in total</div></div></div></div>
+  <div class="card chart"><h3>Messages per hour, last 24 h <span class="num">peak ${Math.max(...j.hourly.map(x=>x.n))}</span></h3>${hourChart(j.hourly)}</div>
+  <div class="card"><h3>Agents <span class="seg">${Object.keys(winName).map(w=>`<button data-act="statwin" data-w="${w}" class="${w===j.window?"on":""}">${w}</button>`).join("")}</span></h3>
+    <p class="lead">${top?`Most productive (${winName[j.window]}): <b style="color:${col(top.agent)}">${esc(top.agent)}</b>, ${top.kinds.result} result${top.kinds.result===1?"":"s"}`:`No results posted in the ${winName[j.window]}.`}</p>
+    <div class="legend">${KORDER.map(k=>`<span><i style="background:${KCOL[k]}"></i>${k} <span class="num">${tot[k]}</span></span>`).join("")}</div>
+    <div class="ahead"><span></span><span>agent · click to show only theirs</span><span>results</span><span>all</span></div>
+    ${ag.length?ag.map(a=>{const [c,l]=live(a);return `<div class="arow${FOCUS_AGENT===a.agent?" sel":""}" data-act="focus-agent" data-agent="${esc(a.agent)}" title="${esc(a.agent)}: ${a.total} messages, ${a.kinds.result} results (${winName[j.window]})">
+      <span class="av sm" style="--c:${col(a.agent)};--c2:${col2(a.agent)}"><b>${esc(ini(a.agent))}</b></span><span class="nm">${esc(a.agent)}</span><span class="r"><b>${a.kinds.result}</b></span><span class="t">${a.total}</span>
+      ${kindBar(a.kinds,a.total)}
+      <span class="sub"><span class="dot" style="background:${c}"></span>${l} · ${a.last?ago(a.last):"–"}${a.claims?` · ${a.claims} active claim${a.claims>1?"s":""}`:""}</span></div>`}).join(""):`<div class="l">No messages in the ${winName[j.window]}.</div>`}</div>
+  <div class="card"><h3>Responsiveness (${winName[j.window]})</h3><div class="tiles">
+    <div class="tile"><div class="v num">${rp.median_min==null?"–":rp.median_min<60?rp.median_min+'<span class="u"> min</span>':(rp.median_min/60).toFixed(1)+'<span class="u"> h</span>'}</div><div class="l">median time to a first reply or ack</div></div>
+    <div class="tile"><div class="v num">${rp.unanswered}</div><div class="l">of ${rp.requests} requests still without reply or ack</div></div></div></div>
+  <div class="card"><h3>Questions to everyone</h3>${asks.length?asks.map(a=>`<div class="qrow">${a.status==="escalated"?'<span class="tag crit">⚠ needs you</span>':a.status==="open"?'<span class="tag warn">❓ unclaimed</span>':`<span class="tag info">${a.status==="taken"?"✋ "+esc(a.owner):"➡ "+esc(a.owner)}</span>`}
+      <a href="#" class="jump" data-id="${a.msg}">#${a.msg} ${esc(a.subject||"")}</a></div>`).join(""):'<div class="l">No open questions.</div>'}</div>
+  <div class="foot">updated ${esc(j.now.slice(11,16))} · ${winName[j.window]}</div>`;
+  if(html!==STATS_HTML){STATS_HTML=html;$("stats").innerHTML=html}}
+$("stats").addEventListener("pointerenter",()=>{STATS_HOVER=true});
+$("stats").addEventListener("pointerleave",()=>{STATS_HOVER=false;if(STATS_DIRTY){STATS_DIRTY=false;renderStats()}});
+function setHdr(){document.documentElement.style.setProperty("--hdr",document.querySelector("header").getBoundingClientRect().height+"px");
+  const slot=$("statslot"),st=$("stats"),wide=!matchMedia("(max-width:1360px)").matches;
+  st.style.left=wide&&getComputedStyle(slot).display!=="none"?slot.getBoundingClientRect().left+"px":"";navUpdate()}
+addEventListener("resize",setHdr);
+if(ls("coordNoStats")==="1")document.body.classList.add("nostats");
+// hover tooltip for anything carrying data-tip (chart bars, kind segments)
+document.addEventListener("pointermove",e=>{const t=e.target.closest&&e.target.closest("[data-tip]"),tip=$("tip");
+  if(!t){tip.hidden=true;return}tip.textContent=t.dataset.tip;tip.hidden=false;
+  const w=tip.offsetWidth;tip.style.left=Math.min(innerWidth-w-8,Math.max(8,e.clientX-w/2))+"px";tip.style.top=(e.clientY-34)+"px"});
+
+/* ---------- rooms (admin) ---------- */
+const hm=location.hash.match(/admin=([\w-]+)/);
+if(hm){ls("coordAdm",hm[1]);history.replaceState(null,"",location.pathname)}
+let ADM=ls("coordAdm")||"";$("admbtn").hidden=!ADM;
+async function checkAdmin(tok){                                           // is this admin token the server's current one?
+  try{const r=await fetch("/api/admin/check",{method:"POST",headers:{"X-Admin-Token":tok,"Content-Type":"application/json"},body:"{}"});return r.ok}catch(e){return null}}
+async function useAdmin(tok){
+  const ok=await checkAdmin(tok);
+  if(ok===false){const e=$("admerr");if(e)e.textContent="That is not the current admin link.";return false}
+  ls("coordAdm",tok);ADM=tok;ADM_BAD=false;$("admbtn").hidden=false;
+  for(const [id,{m}] of ITEMS){const o=ITEMS.get(id);const el=msgEl(m);o.el.replaceWith(el);o.el=el}   // reply links appear on every message
+  for(let i=0;i<ORDER.length;i++)decorate(i);for(const [id,{m,el}] of ITEMS)hydrate(el,id,m);
+  composerRender();return true}
+const SHOWN={};
+async function adminCall(act,d,confirmText){
+  if(confirmText&&!confirm(confirmText))return;
+  try{const r=await fetch("/api/admin/"+act,{method:"POST",headers:{"X-Admin-Token":ADM,"Content-Type":"application/json"},body:JSON.stringify(d)});
+    const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);if(j.code)SHOWN[d.room]={code:j.code,agent:j.agent||"",label:j.label||"code"};await fetchState();admRender()}catch(e){alert(e.message)}}
+let COORD_CMD="python3 coord.py";       // the server says where coord.py lives relative to the project folder
+const joinLine=(code,agent)=>`${COORD_CMD} join '${code}' --me '${agent||"<AgentName>"}'`;
+function admRender(){
+  $("adm").innerHTML=`<div class="ph"><b>Rooms</b><button data-act="close-panel" title="close">✕</button></div>
+   <input id="newroom" placeholder="new room name" size="16"> <button data-act="adm-create">Create room</button>`+
+  ROOMS.map(r=>{const sh=SHOWN[r.name],inv=r.invites||[];return `<div class="room"><b>${esc(r.name)}</b> <span style="color:var(--mut)">created ${esc(r.created)}</span>
+   <div>${r.members.length?r.members.map(m=>`<span class="chip" style="border-color:${col(m.agent)};color:${col(m.agent)}" title="joined ${esc(m.joined)}">${esc(m.agent)} <span class="x" data-act="adm-kick" data-room="${esc(r.name)}" data-agent="${esc(m.agent)}" title="remove from the room">✕ kick</span></span>`).join(" "):"<i>no members</i>"}</div>
+   <div class="inv">Invite an agent: <input data-invname="${esc(r.name)}" placeholder="agent name (optional)" size="18">
+     <button data-act="adm-invite" data-room="${esc(r.name)}">Create invite</button>
+     <span class="hintc">single use; the room's other codes keep working</span></div>
+   ${sh?`<div>${esc(sh.label)}, shown once:<code data-joinline="${esc(r.name)}">${esc(joinLine(sh.code,sh.agent))}</code>
+     <button data-act="adm-copy" data-room="${esc(r.name)}">Copy</button> <button data-act="adm-hide" data-room="${esc(r.name)}">Hide</button></div>`:""}
+   ${inv.length?`<div class="pend">Pending invites: ${inv.map(i=>`<span>${i.agent?esc(i.agent):"anyone"} · ${esc(String(i.created).slice(5,16))} <span class="x" data-act="adm-revoke" data-room="${esc(r.name)}" data-id="${i.id}" title="revoke this invite">✕</span></span>`).join("")}</div>`:""}
+   <div class="danger">If a code leaked: <button data-act="adm-reset" data-room="${esc(r.name)}">Reset all codes</button> (new room code, unused invites revoked, members stay) · <button class="x" data-act="adm-close" data-room="${esc(r.name)}">Close room</button></div></div>`}).join("")}
+/* ---------- one event handler for every control on the page ---------- */
+function under(p){setHdr();p.style.top=(document.querySelector("header").getBoundingClientRect().bottom+4)+"px"}
+function togglePanel(id,render){const p=$(id),open=p.hidden;$("snd").hidden=true;$("adm").hidden=true;$("cal").hidden=true;document.body.classList.remove("showstats");   // one overlay at a time
+  if(open){under(p);render();p.hidden=false}}
+document.addEventListener("click",e=>{
+  const j=e.target.closest("a.jump");if(j){e.preventDefault();jump(+j.dataset.id);return}
+  const a=e.target.closest("[data-act]");if(!a)return;
+  const act=a.dataset.act,ag=a.dataset.agent,room=a.dataset.room;
+  if(act==="more"){const m=a.closest(".msg");m.classList.toggle("collapsed");a.textContent=m.classList.contains("collapsed")?"show more":"show less"}
+  else if(act==="older")loadOlder();
+  else if(act==="cmp-open"){CMP.open=true;composerRender("cmp-subject")}
+  else if(act==="adm-link"){const v=($("admlink").value||"").trim(),m=v.match(/admin=([\w-]+)/);useAdmin(m?m[1]:v)}
+  else if(act==="cmp-close"){CMP.open=false;CMP.reply=null;stopDictation();composerRender()}
+  else if(act==="cmp-to"){const n=a.dataset.n;if(n==="all"){CMP.to=new Set(["all"])}else{CMP.to.delete("all");CMP.to.has(n)?CMP.to.delete(n):CMP.to.add(n);if(!CMP.to.size)CMP.to.add("all")}composerRender()}
+  else if(act==="cmp-preview"){CMP.preview=!CMP.preview;composerRender()}
+  else if(act==="cmp-noreply"){CMP.reply=null;composerRender()}
+  else if(act==="cmp-mic")dictate();
+  else if(act==="reply"){const it=ITEMS.get(+a.dataset.id)||{m:RESULTS.get(+a.dataset.id)};const m=it.m;if(!m)return;
+    if(SEARCHING)clearSearch();CMP.open=true;CMP.reply=m.id;CMP.to=new Set([m.sender]);
+    CMP.prefill={subject:"Re: "+m.subject.replace(/^Re:\s*/i,""),kind:m.kind==="request"?"answer":"info"};composerRender("cmp-body")}
+  else if(act==="newer")loadNewer();
+  else if(act==="nav-first"){e.preventDefault();$("cal").hidden=true;jumpFirst()}
+  else if(act==="nav-last"){e.preventDefault();$("cal").hidden=true;jumpLatest()}
+  else if(act==="nav-up")scrollBy(0,-innerHeight*.85);
+  else if(act==="nav-down")scrollBy(0,innerHeight*.85);
+  else if(act==="nav-cal"){const p=$("cal"),open=p.hidden;$("snd").hidden=$("adm").hidden=true;document.body.classList.remove("showstats");p.hidden=!open;if(open){under(p);calRender()}}
+  else if(act==="cal-day")jumpTime(a.dataset.day+" 00:00:00");
+  else if(act==="cal-hour")jumpTime(a.dataset.at);
+  else if(act==="cal-go"){const v=$("cal-at").value;if(v)jumpTime(v.replace("T"," ")+":00")}
+  else if(act==="chip"){const n=a.dataset.n;off.has(n)?off.delete(n):off.add(n);FOCUS_AGENT=null;chips();applyFilters();renderStats()}
+  else if(act==="clearsearch"){e.preventDefault();clearSearch()}
+  else if(act==="reload")location.reload();
+  else if(act==="toggle-snd"){togglePanel("snd",sndRender);loadVoices()}
+  else if(act==="toggle-adm")togglePanel("adm",admRender);
+  else if(act==="toggle-stats"){if(matchMedia("(max-width:1360px)").matches){$("snd").hidden=$("adm").hidden=true;document.body.classList.toggle("showstats");navUpdate()}
+    else{const off=document.body.classList.toggle("nostats");ls("coordNoStats",off?"1":"0")}setHdr();loadStats(true)}
+  else if(act==="stats-retry")loadStats(true);
+  else if(act==="statwin"){STATWIN=a.dataset.w;ls("coordStatWin",STATWIN);STATS_HOVER=false;loadStats(true).then(()=>{STATS_HOVER=$("stats").matches(":hover")})}
+  else if(act==="focus-agent"){                                           // show only this agent's messages (click again for everyone)
+    if(FOCUS_AGENT===ag){FOCUS_AGENT=null;off.clear()}else{FOCUS_AGENT=ag;off.clear();agentNames().forEach(n=>{if(n!==ag)off.add(n)})}
+    chips();applyFilters();const h=STATS_HOVER;STATS_HOVER=false;renderStats();STATS_HOVER=h;scrollBottom()}
+  else if(act==="close-panel")a.closest(".panel").hidden=true;
+  else if(act==="snd-chime"){unlockAudio();chimeNow(ag)}
+  else if(act==="snd-test")testVoice(ag);
+  else if(act==="snd-stop")stopAll();
+  else if(act==="snd-copy")navigator.clipboard.writeText(LOG.join("\n"));
+  else if(act==="adm-create")adminCall("create",{room:$("newroom").value.trim()});
+  else if(act==="adm-invite")adminCall("invite",{room,agent:(document.querySelector(`[data-invname="${CSS.escape(room)}"]`)||{}).value.trim()});
+  else if(act==="adm-revoke")adminCall("revoke-invite",{room,id:+a.dataset.id},"Revoke this invite?");
+  else if(act==="adm-reset")adminCall("reset",{room},`Reset all codes of ${room}? The room code and all unused invites stop working; members stay.`);
+  else if(act==="adm-close")adminCall("close",{room},`Close room ${room} and remove ALL members?`);
+  else if(act==="adm-kick")adminCall("kick",{room,agent:ag},`Remove ${ag} from ${room}?`);
+  else if(act==="adm-copy")navigator.clipboard.writeText(document.querySelector(`[data-joinline="${CSS.escape(room)}"]`).textContent);
+  else if(act==="adm-hide"){delete SHOWN[room];admRender()}});
+document.addEventListener("change",e=>{const t=e.target,d=t.dataset;
+  if(d.set==="sound"||d.set==="speak"){SET[d.set]=t.checked;saveSet();
+    if(t.checked){unlockAudio();if(d.set==="sound")chimeNow("Agent Chat");else enqueue({url:ttsURL({agent:"Agent Chat",test:1}),label:"read-aloud on"},true)}
+    else if(d.set==="speak")stopAll()}
+  else if(d.mute!==undefined){const n=d.mute;SET.muted=SET.muted.filter(x=>x!==n);if(t.checked)SET.muted.push(n);saveSet()}
+  else if(d.voice!==undefined)setVoice(d.voice,t.value);
+  else if(t.id==="kind"){KIND=t.value;chips();applyFilters()}
+  else if(t.id==="abs")document.querySelectorAll(".tm").forEach(setTime)});
+document.addEventListener("input",e=>{const t=e.target,d=t.dataset;
+  if(d.set==="vol"){SET.vol=+t.value;AUD.volume=SET.vol;saveSet()}
+  else if(d.set==="rate"){SET.rate=+t.value;saveSet();const r=$("ratev");if(r)r.textContent=SET.rate.toFixed(1)+"×"}
+  else if(t.id==="q"){clearTimeout(SEARCH_T);SEARCH_T=setTimeout(runSearch,300)}});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)&&document.activeElement.closest&&document.activeElement.closest("#cmp")){e.preventDefault();composerSend();return}
+  const typing=/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
+  if(!typing&&!e.metaKey&&!e.ctrlKey&&(e.key==="Home"||e.key==="End")){e.preventDefault();e.key==="Home"?jumpFirst():jumpLatest();return}
+  if(e.key==="/"&&!typing){e.preventDefault();$("q").focus()}
+  else if(e.key==="Escape"&&!$("cal").hidden){$("cal").hidden=true}
+  else if(e.key==="Escape"){if(CMP.open&&document.activeElement.closest&&document.activeElement.closest("#cmp")){CMP.open=false;stopDictation();composerRender()}
+    else if(!$("snd").hidden||!$("adm").hidden){$("snd").hidden=$("adm").hidden=true}
+    else if(document.body.classList.contains("showstats"))document.body.classList.remove("showstats");else if($("q").value)clearSearch()}});
+addEventListener("scroll",()=>{
+  if(nearBottom()&&!SEARCHING){if(TAIL()){NEWCOUNT=0;markSeen()}else loadNewer()}
+  if(scrollY<400&&!SEARCHING&&document.readyState==="complete"&&ORDER.length)loadOlder();   // backup for the observers below
+  navUpdate();showPill()},{passive:true});
+addEventListener("resize",navUpdate);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden){TITLE_UNREAD=0;document.title="Agent Chat";markSeen()}});
+
+/* ---------- start ---------- */
+async function init(){
+  saveSet();setHdr();composerRender();                                    // drawn first: its height must not push the view off the bottom later
+  for(let n=0;!LOADED;n++){
+    try{
+      const j=await api(`/api/messages?v=${PAGE_VERSION}&limit=150`);bounds(j);
+      const ms=j.messages;firstUnseen=lastSeen?(ms.find(m=>m.id>lastSeen)||{}).id||null:null;
+      ANNOUNCE_AFTER=j.last||0;LIVEMAX=j.last||0;BEFORE=j.before||0;AFTER=0;LOADED=true;
+      addNew(ms);await fetchState();edges();chips();scrollBottom();markSeen();   // state after the messages: it asks only for their read receipts
+    }catch(e){$("older").textContent="Cannot reach the server, retrying… ("+e.message+")";setConn(false);await sleep(Math.min(10000,1500*(n+1)))}}
+  let READY=false;setTimeout(()=>READY=true,500);                        // not before the first scroll to the bottom
+  new IntersectionObserver(es=>{if(READY&&es.some(x=>x.isIntersecting)&&!SEARCHING)loadOlder()}).observe($("older"));   // reaching the top loads more
+  new IntersectionObserver(es=>{if(READY&&es.some(x=>x.isIntersecting)&&!SEARCHING&&!TAIL())loadNewer()}).observe($("newer"));
+  connectStream();loadVoices();
+  if(ADM&&(await checkAdmin(ADM))===false){ls("coordAdm","");ADM="";ADM_BAD=true;$("admbtn").hidden=true;   // a token from an older server start
+    for(const [id,{m}] of ITEMS){const o=ITEMS.get(id);const el=msgEl(m);o.el.replaceWith(el);o.el=el}for(let i=0;i<ORDER.length;i++)decorate(i);for(const [id,{m,el}] of ITEMS)hydrate(el,id,m)}
+  {const wasNear=nearBottom();composerRender();if(wasNear)scrollBottom()}
+  setInterval(()=>{document.querySelectorAll("#list .tm").forEach(setTime);for(const id in ASKS){const it=ITEMS.get(+id);if(it)hydrate(it.el,+id,it.m)}},30000);
+  setInterval(fetchNew,5000);setInterval(fetchState,20000);               // safety net if a push notice is ever missed
+  loadStats(true);setInterval(()=>loadStats(true),60000);
+}
+init();
+</script></body></html>
