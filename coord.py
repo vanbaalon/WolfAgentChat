@@ -38,8 +38,8 @@ except (OSError, ValueError):
     _CFG = {}
 ROOT = os.path.realpath(os.environ.get("COORD_ROOT") or os.path.join(HERE, _CFG.get("root", "..")))
 PROJECT = os.environ.get("COORD_PROJECT") or _CFG.get("project") or re.sub(r"[^a-z0-9]+", "-", os.path.basename(ROOT).lower()).strip("-") or "project"
-DATA_DIR = os.path.expanduser("~/Library/Application Support/agent-coord") if sys.platform == "darwin" else \
-    os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "agent-coord")
+DATA_DIR = os.environ.get("COORD_DATA_DIR") or (os.path.expanduser("~/Library/Application Support/agent-coord") if sys.platform == "darwin" else
+    os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "agent-coord"))
 DEFAULT_DB = os.path.join(DATA_DIR, PROJECT + ".sqlite")
 COORD_CMD = "python3 " + shlex.quote(os.path.relpath(os.path.join(HERE, "coord.py"), ROOT))   # how to run me from the project folder
 KINDS = ["info", "request", "claim-note", "result", "review", "answer"]
@@ -465,6 +465,21 @@ def cmd_inbox(args):
               f"or pass it on / `coord escalate` it.")
     for r in openq:
         print(f"UNCLAIMED QUESTION #{r['msg']} from {r['asker']}: nobody has taken it; `coord take {r['msg']}` or `coord propose {r['msg']} --agent NAME`.")
+    print(f"(Keep the chat armed:  {arm_line(agent)}  in the background.)")
+
+
+WAIT_SECONDS = 300        # agents re-arm the watch at least this often, so nobody is out of touch for long
+
+
+def arm_line(agent):
+    return f"{COORD_CMD} wait --me {shlex.quote(agent)} --timeout {WAIT_SECONDS}"
+
+
+def stay_tuned(agent):
+    """The standing instruction, repeated wherever an agent is told what to do next."""
+    return (f"Keep the chat armed: run this in the background (it returns when a message for you arrives, "
+            f"or after {WAIT_SECONDS // 60} minutes):\n  {arm_line(agent)}\n"
+            f"Each time it returns: run  {COORD_CMD} inbox --me {shlex.quote(agent)}, act on what is for you, then run the wait again.")
 
 
 def cmd_wait(args):
@@ -475,9 +490,12 @@ def cmd_wait(args):
         rows = unread(con, agent)
         if rows:
             print(f"{len(rows)} unread for {agent}: " + "; ".join(f"#{r['id']} {r['sender']}: {r['subject']}" for r in rows))
+            print(f"Now: {COORD_CMD} inbox --me {shlex.quote(agent)}  -- then re-arm:  {arm_line(agent)}")
             return
         time.sleep(args.interval)
-    print(f"no new messages for {agent} within {args.timeout}s")
+    mine, openq = owed_asks(con, agent)
+    extra = f" (you still owe answers: {', '.join('#' + str(r['msg']) for r in mine)})" if mine else ""
+    print(f"no new messages for {agent} within {args.timeout}s{extra}. Re-arm:  {arm_line(agent)}")
 
 
 def cmd_show(args):
@@ -625,6 +643,57 @@ def cmd_export(args):
     print(f"exported to {args.path}")
 
 
+# ---------------------------------------------------------------------------
+# One admin password for every chat on this machine (the super-admin page and
+# admin rights in every chat page). Set only from an interactive terminal.
+# ---------------------------------------------------------------------------
+ADMIN_PW = os.path.join(DATA_DIR, "admin.password")
+ADMIN_SESSIONS = os.path.join(DATA_DIR, "admin.sessions.json")
+
+
+def _scrypt(password, salt):
+    import hashlib
+    return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
+
+
+def password_is_set():
+    return os.path.exists(ADMIN_PW)
+
+
+def check_password(password):
+    import hmac
+    try:
+        with open(ADMIN_PW, encoding="utf-8") as f:
+            salt_hex, key_hex = f.read().strip().split(":")
+    except (OSError, ValueError):
+        return False
+    return hmac.compare_digest(_scrypt(password, bytes.fromhex(salt_hex)).hex(), key_hex)
+
+
+def write_password(password):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    salt = os.urandom(16)
+    fd = os.open(ADMIN_PW, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(salt.hex() + ":" + _scrypt(password, salt).hex())
+    try:
+        os.unlink(ADMIN_SESSIONS)          # a new password signs everyone out
+    except OSError:
+        pass
+
+
+def cmd_set_password(args):
+    import getpass
+    require_human_terminal("set-password")
+    pw = getpass.getpass("New admin password for all agent chats on this machine: ")
+    if len(pw) < 8:
+        sys.exit("coord: use at least 8 characters.")
+    if getpass.getpass("Repeat it: ") != pw:
+        sys.exit("coord: the two entries differ; nothing changed.")
+    write_password(pw)
+    print(f"Admin password set ({ADMIN_PW}). Open any chat page and go to /admin to sign in; earlier sign-ins were ended.")
+
+
 def code_hash(code):
     import hashlib
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
@@ -706,7 +775,14 @@ def cmd_join(args):
     con.execute("INSERT OR IGNORE INTO members(room,agent,joined) VALUES(?,?,?)", (name, agent, now()))
     con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs) VALUES(?,?,?,?,?,?,?)",
                 (now(), agent, json.dumps(["all"]), "info", f"{agent} joined room {name}", "", "[]"))
-    print(f"{agent} joined room '{name}'")
+    print(f"{agent} joined room '{name}'.\n")
+    print("From now on:")
+    print(f"1. {stay_tuned(agent)}")
+    print(f"2. Post with  {COORD_CMD} post --me {shlex.quote(agent)} --to all|NAME --kind info|request|result|answer|review "
+          "--subject '...' --summary 'one or two plain sentences' --body '...'  (the summary is required; reply with --reply-to ID).")
+    print(f"3. Acknowledge requests to you ({COORD_CMD} pending, then ack ID), and when a question to everyone fits you, take it ({COORD_CMD} asks, then take ID).")
+    print(f"4. Before editing shared files, claim them ({COORD_CMD} claim --item ... --file ...); release when done.")
+    print("Full guide: the README next to coord.py, section 'For agents'.")
 
 
 def cmd_rooms(args):
@@ -752,7 +828,7 @@ def main():
     s = add("inbox", cmd_inbox, "show and mark read my unread messages")
     s.add_argument("--peek", action="store_true"); s.add_argument("--brief", action="store_true")
     s = add("wait", cmd_wait, "block until I have unread messages")
-    s.add_argument("--timeout", type=float, default=1700); s.add_argument("--interval", type=float, default=5)
+    s.add_argument("--timeout", type=float, default=WAIT_SECONDS); s.add_argument("--interval", type=float, default=5)
     s = add("show", cmd_show, "show one message"); s.add_argument("id", type=int)
     s = add("thread", cmd_thread, "show a message with its replies"); s.add_argument("id", type=int)
     s = add("log", cmd_log, "recent messages")
@@ -779,6 +855,7 @@ def main():
     s = add("kick", cmd_kick, "USER ONLY: remove one agent from a room")
     s.add_argument("room"); s.add_argument("agent")
     s = add("join", cmd_join, "join a room with a code the user gave you"); s.add_argument("code")
+    add("set-password", cmd_set_password, "USER ONLY (interactive terminal): set the admin password for all chats on this machine")
     s = add("invite", cmd_invite, "USER ONLY: a single-use invite to a room (optionally for one agent); other codes stay valid")
     s.add_argument("room"); s.add_argument("--agent")
     add("rooms", cmd_rooms, "list rooms and their members")

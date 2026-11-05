@@ -139,6 +139,7 @@ body.nostats #wrap{grid-template-columns:minmax(0,980px)}body.nostats #stats,bod
 <button id="sndbtn" data-act="toggle-snd" title="Sound and voice settings">🔔 Sound</button>
 <button id="statbtn" data-act="toggle-stats" title="Activity statistics">📊 Stats</button>
 <button id="admbtn" data-act="toggle-adm" hidden>Rooms</button>
+<a href="/admin" target="_blank" rel="noopener" title="all chats on this computer (admin password)"><button>⚙ Admin</button></a>
 <span id="conn" class="conn off" title="live connection to the server">connecting…</span><span id="stat"></span></header>
 <div id="stale" class="banner" hidden>This page is out of date. <button data-act="reload">Reload</button></div>
 <div id="unlock" class="banner" hidden>🔇 The browser blocks sound until you click on the page: click anywhere to enable it.</div>
@@ -539,7 +540,7 @@ function composerRender(focus){
   if(!ADM){c.innerHTML=`<div class="open locked">✍ <b>To write to the room</b>, paste your admin link (it ends in <code>#admin=…</code>):
      <input type="text" id="admlink" placeholder="http://127.0.0.1:8780/#admin=…" size="34"> <button data-act="adm-link">Unlock</button>
      <span class="err" id="admerr">${ADM_BAD?"Your saved admin link is out of date: paste the current one.":""}</span>
-     <div class="hintc">The chat server prints it when it starts. Ask any agent: <i>“give me the agent chat admin link”</i>. Keep it private.</div></div>`;return}
+     <div class="hintc">Or <a href="/admin" target="_blank" rel="noopener">sign in with the admin password</a> (one password for all chats on this computer). The link is printed when the chat server starts; ask any agent: <i>“give me the agent chat admin link”</i>. Keep it private.</div></div>`;return}
   if(!CMP.open){c.innerHTML=`<button class="open" data-act="cmp-open">✍ Write to the room…</button>`;return}
   const names=agentNames().filter(n=>n!=="Admin"),me=ls("coordMe")||"User",keep=id=>{const e=$(id);return e?e.value:""};
   const v={subject:keep("cmp-subject"),summary:keep("cmp-summary"),body:keep("cmp-body"),kind:keep("cmp-kind")||"info"};
@@ -563,7 +564,7 @@ function composerRender(focus){
 async function composerSend(){
   const me=$("cmp-me").value.trim()||"User";ls("coordMe",me);
   const d={sender:me,to:[...CMP.to],kind:$("cmp-kind").value,subject:$("cmp-subject").value,summary:$("cmp-summary").value,body:$("cmp-body").value,reply_to:CMP.reply};
-  try{const r=await fetch("/api/post",{method:"POST",headers:{"X-Admin-Token":ADM,"Content-Type":"application/json"},body:JSON.stringify(d)});
+  try{const r=await fetch("/api/post",{method:"POST",headers:admHeaders(),body:JSON.stringify(d)});
     const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);
     CMP.open=false;CMP.reply=null;CMP.preview=false;stopDictation();composerRender();await fetchNew();scrollBottom()}
   catch(e){const el=$("cmp-err");if(el)el.textContent=e.message}}
@@ -644,8 +645,12 @@ document.addEventListener("pointermove",e=>{const t=e.target.closest&&e.target.c
 const hm=location.hash.match(/admin=([\w-]+)/);
 if(hm){ls("coordAdm",hm[1]);history.replaceState(null,"",location.pathname)}
 let ADM=ls("coordAdm")||"";$("admbtn").hidden=!ADM;
+// Admin rights come from the admin link's token, or from signing in on the super-admin page (/admin): that
+// session cookie is sent automatically, and the custom header proves the request comes from this page.
+const admHeaders=()=>Object.assign({"Content-Type":"application/json","X-Coord":"1"},ADM&&ADM!=="session"?{"X-Admin-Token":ADM}:{});
 async function checkAdmin(tok){                                           // is this admin token the server's current one?
-  try{const r=await fetch("/api/admin/check",{method:"POST",headers:{"X-Admin-Token":tok,"Content-Type":"application/json"},body:"{}"});return r.ok}catch(e){return null}}
+  try{const r=await fetch("/api/admin/check",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},tok==="session"?{"X-Coord":"1"}:{"X-Admin-Token":tok}),body:"{}"});return r.ok}catch(e){return null}}
+function relinkAll(){for(const [id,{m}] of ITEMS){const o=ITEMS.get(id);const el=msgEl(m);o.el.replaceWith(el);o.el=el}for(let i=0;i<ORDER.length;i++)decorate(i);for(const [id,{m,el}] of ITEMS)hydrate(el,id,m)}
 async function useAdmin(tok){
   const ok=await checkAdmin(tok);
   if(ok===false){const e=$("admerr");if(e)e.textContent="That is not the current admin link.";return false}
@@ -656,7 +661,7 @@ async function useAdmin(tok){
 const SHOWN={};
 async function adminCall(act,d,confirmText){
   if(confirmText&&!confirm(confirmText))return;
-  try{const r=await fetch("/api/admin/"+act,{method:"POST",headers:{"X-Admin-Token":ADM,"Content-Type":"application/json"},body:JSON.stringify(d)});
+  try{const r=await fetch("/api/admin/"+act,{method:"POST",headers:admHeaders(),body:JSON.stringify(d)});
     const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);if(j.code)SHOWN[d.room]={code:j.code,agent:j.agent||"",label:j.label||"code"};await fetchState();admRender()}catch(e){alert(e.message)}}
 let COORD_CMD="python3 coord.py";       // the server says where coord.py lives relative to the project folder
 const joinLine=(code,agent)=>`${COORD_CMD} join '${code}' --me '${agent||"<AgentName>"}'`;
@@ -768,8 +773,8 @@ async function init(){
   new IntersectionObserver(es=>{if(READY&&es.some(x=>x.isIntersecting)&&!SEARCHING)loadOlder()}).observe($("older"));   // reaching the top loads more
   new IntersectionObserver(es=>{if(READY&&es.some(x=>x.isIntersecting)&&!SEARCHING&&!TAIL())loadNewer()}).observe($("newer"));
   connectStream();loadVoices();
-  if(ADM&&(await checkAdmin(ADM))===false){ls("coordAdm","");ADM="";ADM_BAD=true;$("admbtn").hidden=true;   // a token from an older server start
-    for(const [id,{m}] of ITEMS){const o=ITEMS.get(id);const el=msgEl(m);o.el.replaceWith(el);o.el=el}for(let i=0;i<ORDER.length;i++)decorate(i);for(const [id,{m,el}] of ITEMS)hydrate(el,id,m)}
+  if(ADM&&(await checkAdmin(ADM))===false){ls("coordAdm","");ADM="";ADM_BAD=true;$("admbtn").hidden=true;relinkAll()}   // a token from an older server start
+  if(!ADM){try{const w=await (await fetch("/api/whoami")).json();if(w.admin){ADM="session";ADM_BAD=false;$("admbtn").hidden=false;relinkAll()}}catch(e){}}   // signed in on /admin
   {const wasNear=nearBottom();composerRender();if(wasNear)scrollBottom()}
   setInterval(()=>{document.querySelectorAll("#list .tm").forEach(setTime);for(const id in ASKS){const it=ITEMS.get(+id);if(it)hydrate(it.el,+id,it.m)}},30000);
   setInterval(fetchNew,5000);setInterval(fetchState,20000);               // safety net if a push notice is ever missed

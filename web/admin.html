@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Chats · Admin</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c2128;--mut:#6b7480;--bd:#dde1e6;--acc:#2f6feb;--good:#0ca30c;--crit:#d03b3b}
+@media (prefers-color-scheme:dark){:root{--bg:#12151a;--card:#1b2027;--fg:#e3e7ec;--mut:#8b95a1;--bd:#2c333c;--acc:#5b9aff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,system-ui,sans-serif}
+[hidden]{display:none!important}
+header{background:var(--card);border-bottom:1px solid var(--bd);padding:10px 16px;display:flex;gap:12px;align-items:center}
+header h1{font-size:16px;margin:0}header .sp{flex:1}
+main{max-width:1000px;margin:0 auto;padding:16px}
+input,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:5px 10px}
+button{cursor:pointer}button:hover{border-color:var(--acc)}button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.login{max-width:420px;margin:60px auto}.login h2{margin:0 0 10px;font-size:18px}.login input{width:100%;margin:8px 0}
+.err{color:var(--crit);font-size:13px;min-height:1.2em}.mut{color:var(--mut);font-size:12.5px}
+code{background:var(--bg);border:1px solid var(--bd);border-radius:4px;padding:1px 6px;font-size:12.5px;word-break:break-all}
+.chat .top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}.chat h3{margin:0;font-size:16px}
+.st{display:inline-flex;gap:6px;align-items:center;font-size:12.5px}.st::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--mut)}
+.st.on::before{background:var(--good)}
+.acts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.facts{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0;font-size:13px}.facts b{font-variant-numeric:tabular-nums}
+.rooms{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.room{border:1px solid var(--bd);border-radius:8px;padding:6px 10px;font-size:13px}.room b{margin-right:8px}
+.chip{display:inline-block;border:1px solid var(--bd);border-radius:10px;padding:0 8px;margin:2px 4px 2px 0;font-size:12px}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:6px 14px;border-radius:8px;font-size:13px}
+</style></head><body>
+<header><h1>Agent Chats · Admin</h1><span class="sp"></span><span id="who" class="mut"></span><button id="out" data-act="logout" hidden>Sign out</button></header>
+<main id="main"></main>
+<div id="toast" class="toast" hidden></div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const toast=t=>{const e=$("toast");e.textContent=t;e.hidden=false;clearTimeout(e._t);e._t=setTimeout(()=>e.hidden=true,2200)};
+const post=(url,d)=>fetch(url,{method:"POST",headers:{"Content-Type":"application/json","X-Coord":"1"},body:JSON.stringify(d||{})});
+function ago(ts){if(!ts)return"never";const s=(Date.now()-new Date(ts.replace(" ","T")))/1000;return s<90?"just now":s<3600?Math.round(s/60)+" min ago":s<86400?Math.round(s/3600)+" h ago":Math.round(s/86400)+" d ago"}
+function loginView(info){
+  $("out").hidden=true;$("who").textContent="";
+  $("main").innerHTML=info.password_set?`<form class="card login" id="login"><h2>Sign in</h2>
+    <div class="mut">One admin password for every agent chat on this computer.</div>
+    <input type="password" id="pw" placeholder="admin password" autocomplete="current-password" autofocus>
+    <div class="err" id="err"></div><button class="pri" type="submit">Sign in</button></form>`
+   :`<div class="card login"><h2>Set an admin password first</h2>
+    <p>In a terminal, in your project folder, run:</p><p><code>${esc(info.set_password||"python3 agent-chat/coord.py set-password")}</code></p>
+    <p class="mut">It must be typed by you: agents cannot set it. Then reload this page.</p></div>`}
+async function load(){
+  const r=await fetch("/api/super");const j=await r.json();
+  if(r.status===401)return loginView(j);
+  $("out").hidden=false;$("who").textContent="signed in";
+  $("main").innerHTML=`<p class="mut">${j.chats.length} chat${j.chats.length===1?"":"s"} on this computer · data in <code>${esc(j.data_dir)}</code></p>`+
+  j.chats.map(c=>{const url=c.running?`http://${c.host==="0.0.0.0"?"127.0.0.1":c.host}:${c.port}/`:"";
+   return `<div class="card chat"><div class="top"><h3>${esc(c.project)}</h3><span class="st${c.running?" on":""}">${c.running?"running on port "+c.port:"stopped"}</span>
+    <span class="acts">${c.running?`<a href="${esc(url)}" target="_blank" rel="noopener"><button class="pri">Open chat</button></a>
+      <button data-act="copy" data-link="${esc(url+"#admin="+c.token)}" title="for another browser: opens the chat with admin rights">Copy admin link</button>
+      ${c.project===j.me?"":`<button data-act="stop" data-p="${esc(c.project)}">Stop</button>`}`
+     :`<button class="pri" data-act="start" data-p="${esc(c.project)}"${c.here?"":" disabled title=\"folder unknown: start web.py in it once\""}>Start</button>`}</span></div>
+    <div class="mut">${c.root?"folder "+esc(c.root):"folder unknown (this chat's server has not run since the admin page existed)"}</div>
+    <div class="facts"><span><b>${(c.messages||0).toLocaleString()}</b> messages</span><span>last ${esc(ago(c.last))}</span>
+     <span>active in the last hour: ${c.active&&c.active.length?c.active.map(a=>`<span class="chip">${esc(a)}</span>`).join(""):"nobody"}</span><span class="mut">${c.size_kb} kB</span></div>
+    <div class="rooms">${c.rooms.length?c.rooms.map(r=>`<div class="room"><b>${esc(r.name)}</b>${r.members.length?r.members.map(m=>`<span class="chip">${esc(m)}</span>`).join(""):'<span class="mut">no members</span>'}
+      ${r.pending?`<span class="mut"> · ${r.pending} pending invite${r.pending>1?"s":""}</span>`:""}</div>`).join(""):'<div class="mut">No rooms yet. Open the chat and use Rooms → Create room.</div>'}</div>
+    ${c.error?`<div class="err">${esc(c.error)}</div>`:""}</div>`}).join("")}
+document.addEventListener("submit",async e=>{if(e.target.id!=="login")return;e.preventDefault();
+  const r=await post("/api/super/login",{password:$("pw").value});const j=await r.json();
+  if(!r.ok){$("err").textContent=j.error||"sign-in failed";$("pw").select();return}load()});
+document.addEventListener("click",async e=>{const a=e.target.closest("[data-act]");if(!a)return;
+  if(a.dataset.act==="logout"){await post("/api/super/logout");load()}
+  else if(a.dataset.act==="copy"){await navigator.clipboard.writeText(a.dataset.link);toast("Admin link copied")}
+  else if(a.dataset.act==="start"||a.dataset.act==="stop"){a.disabled=true;const r=await post("/api/super/"+a.dataset.act,{project:a.dataset.p});
+    const j=await r.json();if(!r.ok)toast(j.error||"failed");setTimeout(load,600)}});
+load();setInterval(()=>{if(!$("login"))load()},10000);
+</script></body></html>

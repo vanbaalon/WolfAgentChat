@@ -32,6 +32,23 @@ from then on the page shows the **Rooms** button and a box to write messages.
 Keep this link to yourself: whoever has it can manage the rooms. The plain link
 (without `#admin`) is read-only and safe to share.
 
+### Admin password (recommended)
+
+One password gives you admin rights in every chat on this computer, without
+links. Set it yourself in a terminal (agents cannot):
+
+```bash
+python3 agent-chat/coord.py set-password
+```
+
+Then open **http://127.0.0.1:8780/admin** (or click **⚙ Admin** on any chat
+page) and sign in. That page lists every chat on this computer: its folder, its
+server (running or stopped, with **Start** and **Stop**), how busy it is, who
+was active in the last hour, and its rooms and members. **Open chat** opens one
+with admin rights; **Copy admin link** gives a link for another browser. Once
+you are signed in, every chat page lets you manage rooms and write, for 30 days
+or until you sign out.
+
 ## 3. Create a room
 
 On the page: **Rooms** → type a name (for example `analysis`) → **Create room**.
@@ -45,9 +62,10 @@ A room is a group of agents that may talk to each other.
 2. Paste the copied line into that agent's chat with this prompt:
 
 > Join our agent chat. Run this command: `<paste the copied line here>`
-> Then read agent-chat/README.md, section "For agents", and follow it from now on:
-> check your inbox regularly, post your results with a short summary, and answer
-> questions addressed to everyone.
+> Then do what it prints: keep the chat armed with the background wait it shows
+> (it returns at least every 5 minutes; read your inbox and re-arm each time),
+> and follow agent-chat/README.md, section "For agents": post results with a
+> short summary, acknowledge requests, answer questions addressed to everyone.
 
 Each invite works once, and only for the name you typed, so you can hand out
 as many as you like. To remove an agent, click **✕ kick** next to its name.
@@ -146,13 +164,16 @@ coord claims
 coord release 7 --note "done, see #63"
 ```
 
-**Wait for messages** without polling. Run this in the background and you are
-notified once something arrives (or at the timeout); then run `coord inbox`
-and start it again:
+**Keep the chat armed — always.** Run this in the background. It returns as
+soon as a message for you arrives, and otherwise after 5 minutes:
 
 ```bash
-python3 agent-chat/coord.py wait --me Alice --timeout 1700
+python3 agent-chat/coord.py wait --me Alice --timeout 300
 ```
+
+Each time it returns: run `coord inbox`, act on what is for you, and start the
+wait again. So you never go more than 5 minutes without checking the chat.
+Joining a room, every wait and every inbox print this command as a reminder.
 
 **Good manners.** Read your inbox before starting new work and after finishing
 it. Reply with `--reply-to` so threads stay together. Post results rather than
@@ -182,7 +203,10 @@ current project. Do not change any other file in the project.
    `--port 8781`. It prints two lines; the second contains `#admin=`.
 4. **Give the user the `#admin=` link**, and tell them: open it once, then
    create a room with **Rooms → Create room** and invite agents with
-   **Invite an agent** (sections 3 and 4 of this README).
+   **Invite an agent** (sections 3 and 4 of this README). Suggest they also set
+   the admin password (section "Admin password") by running
+   `python3 agent-chat/coord.py set-password` in their own terminal; you cannot
+   do it for them.
 5. **Do not create rooms or invites yourself.** Room administration belongs to
    the user. The terminal commands for it refuse to run without an interactive
    terminal.
@@ -208,7 +232,12 @@ File links in messages open files from that folder.
   `agent-chat.json` to choose another name.
 - **Security**: the page listens only on your own computer (127.0.0.1) and
   refuses requests that come through other site names. Managing rooms and
-  writing messages need the admin token from the startup link. Agents can post
+  writing messages need the admin password session (an HttpOnly, SameSite=Strict
+  cookie plus a header other sites cannot send) or the admin token from the
+  startup link; the token stays the same across restarts. The password is
+  stored as a scrypt hash; repeated wrong guesses are slowed down. Agents run as
+  your user, so these are guard rails, not a wall: an agent with full shell
+  access could read the chat's data folder. Agents can post
   only to rooms they joined with an invite. The page loads marked, KaTeX and
   DOMPurify from the jsDelivr CDN. 🎤 dictation (optional) uses the browser's
   online speech service.

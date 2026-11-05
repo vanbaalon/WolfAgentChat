@@ -12,7 +12,7 @@ Read-aloud audio is rendered here with the operating system's speech engine
 Room administration (new room, invite code, kick, close) needs the admin token
 printed at startup (open the printed #admin=... URL once; set COORD_WEB_TOKEN to keep it fixed).
 """
-import argparse, hmac, json, mimetypes, os, re, secrets, sqlite3, statistics, sys, threading, time
+import argparse, atexit, glob, hmac, json, mimetypes, os, re, secrets, socket, sqlite3, statistics, subprocess, sys, threading, time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
@@ -43,6 +43,195 @@ def _token():
 
 
 TOKEN = _token()
+PORT, HOST = 8780, "127.0.0.1"         # set in main
+
+
+# ---------------------------------------------------------------------------
+# Super admin: one password for every chat on this machine. A sign-in gives a
+# session cookie (HttpOnly, SameSite=Strict) that every chat server here
+# accepts, because cookies do not depend on the port.
+# ---------------------------------------------------------------------------
+_sess_lock = threading.Lock()
+_fails = {"n": 0, "t": 0.0}
+
+
+def _sessions():
+    try:
+        with open(coord.ADMIN_SESSIONS, encoding="utf-8") as f:
+            d = json.load(f)
+        return {k: v for k, v in d.items() if v > time.time()} if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_sessions(d):
+    os.makedirs(coord.DATA_DIR, exist_ok=True)
+    tmp = coord.ADMIN_SESSIONS + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(d, f)
+    os.replace(tmp, coord.ADMIN_SESSIONS)
+
+
+def new_session():
+    sid = secrets.token_urlsafe(24)
+    with _sess_lock:
+        d = _sessions()
+        d[sid] = time.time() + 30 * 86400
+        _save_sessions(d)
+    return sid
+
+
+def session_ok(sid):
+    return bool(sid) and coord.password_is_set() and sid in _sessions()
+
+
+def drop_session(sid):
+    with _sess_lock:
+        d = _sessions()
+        d.pop(sid, None)
+        _save_sessions(d)
+
+
+def _alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _listening(host, port):
+    try:
+        with socket.create_connection((host, int(port)), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def register():
+    """Tell the super-admin page where this chat's server runs."""
+    info = {"project": coord.PROJECT, "root": ROOT, "here": HERE, "port": PORT, "host": HOST, "pid": os.getpid(), "started": coord.now()}
+    path = os.path.join(coord.DATA_DIR, coord.PROJECT + ".server.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(info, f)
+
+    def bye():                              # keep the folder on record (so the admin page can start it again), drop the process
+        try:
+            with open(path, encoding="utf-8") as f:
+                cur = json.load(f)
+            if cur.get("pid") == os.getpid():
+                cur.update(pid=None, stopped=coord.now())
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(cur, f)
+        except (OSError, ValueError):
+            pass
+    atexit.register(bye)
+    return bye
+
+
+def overview():
+    """Every chat board on this machine with its server, rooms and activity."""
+    chats = []
+    for dbp in sorted(glob.glob(os.path.join(coord.DATA_DIR, "*.sqlite"))):
+        name = os.path.basename(dbp)[:-7]
+        reg = {}
+        try:
+            with open(os.path.join(coord.DATA_DIR, name + ".server.json"), encoding="utf-8") as f:
+                reg = json.load(f)
+        except (OSError, ValueError):
+            pass
+        running = bool(reg) and _alive(reg.get("pid")) and _listening(reg.get("host", "127.0.0.1"), reg.get("port", 0))
+        tok = ""
+        try:
+            with open(os.path.join(coord.DATA_DIR, name + ".webtoken"), encoding="utf-8") as f:
+                tok = f.read().strip()
+        except OSError:
+            pass
+        c = {"project": name, "root": reg.get("root"), "here": reg.get("here"), "running": running,
+             "port": reg.get("port"), "host": reg.get("host", "127.0.0.1"), "token": tok, "rooms": [], "messages": 0}
+        try:
+            con = sqlite3.connect("file:%s?mode=ro" % dbp, uri=True, timeout=3)
+            con.row_factory = sqlite3.Row
+            r = con.execute("SELECT count(*), max(ts) FROM messages").fetchone()
+            c["messages"], c["last"] = r[0], r[1]
+            hour = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 3600))
+            c["active"] = [x[0] for x in con.execute("SELECT DISTINCT sender FROM messages WHERE ts>=? AND sender<>'Admin'", (hour,))]
+            for room in con.execute("SELECT name, created FROM rooms ORDER BY name"):
+                members = [x[0] for x in con.execute("SELECT agent FROM members WHERE room=? ORDER BY joined", (room["name"],))]
+                try:
+                    pend = con.execute("SELECT count(*) FROM invites WHERE room=? AND used IS NULL AND revoked IS NULL", (room["name"],)).fetchone()[0]
+                except sqlite3.OperationalError:
+                    pend = 0
+                c["rooms"].append({"name": room["name"], "created": room["created"], "members": members, "pending": pend})
+            con.close()
+        except sqlite3.Error as e:
+            c["error"] = str(e)
+        c["size_kb"] = round(os.path.getsize(dbp) / 1024)
+        chats.append(c)
+    chats.sort(key=lambda c: (not c["running"], c.get("last") or ""), reverse=False)
+    return {"chats": chats, "data_dir": coord.DATA_DIR, "me": coord.PROJECT, "set_password": coord.COORD_CMD + " set-password"}
+
+
+CHILDREN = {}                          # chat servers started from this admin page: reaped on stop (no zombies)
+
+
+def _free_port(start=8780):
+    for p in range(start, start + 100):
+        with socket.socket() as s_:
+            try:
+                s_.bind(("127.0.0.1", p))
+                return p
+            except OSError:
+                continue
+    raise RuntimeError("no free port")
+
+
+def start_chat(project):
+    c = next((c for c in overview()["chats"] if c["project"] == project), None)
+    if not c:
+        raise ValueError("no such chat")
+    if c["running"]:
+        return {"port": c["port"]}
+    if not c.get("here") or not os.path.exists(os.path.join(c["here"], "web.py")):
+        raise ValueError("this chat's folder is unknown: start web.py in it once")
+    port = _free_port()
+    log = open(os.path.join(coord.DATA_DIR, project + ".server.log"), "a")
+    env = dict(os.environ)
+    env.pop("COORD_DB", None)                            # the started server must open its own board, not ours
+    env["COORD_PROJECT"] = project
+    CHILDREN[project] = subprocess.Popen([sys.executable, os.path.join(c["here"], "web.py"), "--port", str(port)], cwd=c["here"],
+                                         stdout=log, stderr=log, start_new_session=True, env=env)
+    for _ in range(40):
+        if _listening("127.0.0.1", port):
+            return {"port": port}
+        time.sleep(0.1)
+    return {"port": port, "note": "started, still coming up"}
+
+
+def stop_chat(project):
+    c = next((c for c in overview()["chats"] if c["project"] == project), None)
+    if not c or not c["running"]:
+        return {}
+    with open(os.path.join(coord.DATA_DIR, project + ".server.json"), encoding="utf-8") as f:
+        pid = json.load(f)["pid"]
+    if pid == os.getpid():
+        raise ValueError("this is the server you are using; stop it from its terminal")
+    cmdline = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout
+    if "web.py" not in cmdline:                           # never signal a process that is not a chat server
+        raise ValueError("the registered process is not a chat server")
+    os.kill(pid, 15)
+    child = CHILDREN.pop(project, None)
+    if child and child.pid == pid:
+        try:
+            child.wait(timeout=5)                         # our own child: reap it
+        except subprocess.TimeoutExpired:
+            pass
+    for _ in range(50):                                   # report back only once it has really gone
+        if not _alive(pid) or not _listening(c["host"], c["port"]):
+            break
+        time.sleep(0.1)
+    return {"stopped": not _listening(c["host"], c["port"])}
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$")
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT, DEFAULT_DB = coord.PROJECT, coord.DEFAULT_DB      # same project folder, name and database as coord.py
@@ -400,6 +589,22 @@ class H(BaseHTTPRequestHandler):
     def json(self, obj, code=200):
         return self.send(code, "application/json", json.dumps(obj).encode())
 
+    def cookie(self, name):
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return ""
+
+    def session(self):
+        return session_ok(self.cookie("coord_admin"))
+
+    def is_admin(self):
+        """The admin token, or a super-admin session plus a custom header (which other sites cannot send)."""
+        if hmac.compare_digest(self.headers.get("X-Admin-Token", ""), TOKEN):
+            return True
+        return self.session() and self.headers.get("X-Coord") == "1"
+
     def host_ok(self):
         # DNS-rebinding guard: a page on another site must not be able to read the board through 127.0.0.1
         if ALLOWED_HOSTS is None:
@@ -412,6 +617,16 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         try:
+            if u.path == "/admin":
+                with open(os.path.join(HERE, "web", "admin.html"), "rb") as f:
+                    return self.send(200, "text/html; charset=utf-8", f.read())
+            if u.path == "/api/whoami":
+                return self.json({"admin": self.session(), "password_set": coord.password_is_set(), "project": coord.PROJECT})
+            if u.path == "/api/super":
+                if not self.session():
+                    return self.json({"error": "sign in first", "password_set": coord.password_is_set(),
+                                      "set_password": coord.COORD_CMD + " set-password"}, 401)
+                return self.json(overview())
             if u.path in ("/", "/index.html"):
                 with open(os.path.join(HERE, "web", "index.html"), "rb") as f:
                     return self.send(200, "text/html; charset=utf-8", f.read())
@@ -529,14 +744,46 @@ class H(BaseHTTPRequestHandler):
         try:
             n = int(self.headers.get("Content-Length", 0))
             d = json.loads(self.rfile.read(n) or b"{}")
+            if u.path == "/api/super/login":
+                if not coord.password_is_set():
+                    return self.json({"error": "no admin password yet: run  %s set-password  in a terminal" % coord.COORD_CMD}, 400)
+                wait = _fails["n"] and min(30, 2 ** min(_fails["n"], 5)) - (time.time() - _fails["t"])
+                if wait and wait > 0:
+                    return self.json({"error": "too many wrong passwords; try again in %d s" % int(wait + 1)}, 429)
+                if not coord.check_password(str(d.get("password", ""))):
+                    _fails.update(n=_fails["n"] + 1, t=time.time())
+                    return self.json({"error": "wrong password"}, 403)
+                _fails.update(n=0)
+                sid = new_session()
+                self.send_response(200)
+                body = b'{"ok": true}'
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Set-Cookie", "coord_admin=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict" % (sid, 30 * 86400))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if u.path == "/api/super/logout":
+                drop_session(self.cookie("coord_admin"))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.send_header("Set-Cookie", "coord_admin=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+                self.end_headers()
+                self.wfile.write(b"{}")
+                return
+            if u.path in ("/api/super/start", "/api/super/stop"):
+                if not (self.session() and self.headers.get("X-Coord") == "1"):
+                    return self.json({"error": "sign in first"}, 403)
+                fn = start_chat if u.path.endswith("start") else stop_chat
+                return self.json(fn(str(d.get("project", ""))))
             if u.path == "/api/voice":
                 # a custom header cannot be sent cross-site without a CORS preflight, which this server never grants
                 if self.headers.get("X-Coord") != "1":
                     return self.json({"error": "forbidden"}, 403)
                 VOICES.set(str(d.get("agent", ""))[:60], str(d.get("voice", "")))
                 return self.json({"ok": True})
-            if not hmac.compare_digest(self.headers.get("X-Admin-Token", ""), TOKEN):
-                return self.json({"error": "forbidden: missing or wrong admin token"}, 403)
+            if not self.is_admin():
+                return self.json({"error": "forbidden: sign in as admin (/admin) or use the admin link"}, 403)
             if u.path == "/api/post":
                 return self.json(user_post(d))
             if u.path == "/api/admin/check":
@@ -568,6 +815,15 @@ if __name__ == "__main__":
         tts.voices(block=False)              # start checking the voices now, in the background
     print("coord web on http://%s:%d  (db: %s, speech: %s)" % (a.host, a.port, db_path(), tts.ENGINE or "none"))
     print("admin (invite links, kick): http://%s:%d/#admin=%s" % (a.host, a.port, TOKEN))
+    print("all chats on this machine (password): http://%s:%d/admin" % (a.host, a.port))
+    PORT, HOST = a.port, a.host
     srv = ThreadingHTTPServer((a.host, a.port), H)
+    unregister = register()
+    import signal
+
+    def _term(*_):                          # stopped from the admin page: unregister and exit now, even mid voice check
+        unregister()
+        os._exit(0)
+    signal.signal(signal.SIGTERM, _term)
     srv.daemon_threads = True
     srv.serve_forever()
