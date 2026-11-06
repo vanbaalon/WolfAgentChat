@@ -161,12 +161,99 @@ def connect():
             con.execute("ALTER TABLE reads ADD COLUMN ts TEXT")
         except sqlite3.OperationalError:
             pass
+    if "room" not in {r["name"] for r in con.execute("PRAGMA table_info(messages)")}:
+        try:   # messages belong to a room; existing ones are assigned once from their senders' memberships
+            con.execute("ALTER TABLE messages ADD COLUMN room TEXT")
+            con.execute("CREATE INDEX IF NOT EXISTS messages_room ON messages(room, id)")
+            backfill_rooms(con)
+        except sqlite3.OperationalError:
+            pass
     if "summary" not in {r["name"] for r in con.execute("PRAGMA table_info(messages)")}:
         try:   # older boards: add the column; old messages keep an empty summary
             con.execute("ALTER TABLE messages ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError:
             pass
     return con
+
+
+# ---------------------------------------------------------------------------
+# Rooms. Every message belongs to one room (or none, on boards without rooms).
+# "all" means everyone in that room.
+# ---------------------------------------------------------------------------
+def rooms_of(con, agent):
+    return [r["room"] for r in con.execute("SELECT room FROM members WHERE agent=? ORDER BY joined", (agent,))]
+
+
+def room_mates(con, room):
+    return {r["agent"] for r in con.execute("SELECT agent FROM members WHERE room=?", (room,))}
+
+
+def own_room(con, agent):
+    """The agent's room if it has exactly one (for automatic notes such as claims)."""
+    mine = rooms_of(con, agent)
+    return mine[0] if len(mine) == 1 else None
+
+
+def pick_room(con, agent, explicit, rec, reply_to):
+    """The room a new message goes to: --room, else the agent's only room, else what the reply or recipients imply."""
+    mine = rooms_of(con, agent)
+    if explicit:
+        if mine and explicit not in mine:
+            sys.exit(f"coord: refused. You are not in room '{explicit}' (your rooms: {', '.join(mine)}).")
+        return explicit
+    if not mine:
+        return None
+    if len(mine) == 1:
+        return mine[0]
+    if reply_to:
+        r = con.execute("SELECT room FROM messages WHERE id=?", (reply_to,)).fetchone()
+        if r and r["room"] in mine:
+            return r["room"]
+    named = [x for x in rec if x != "all"]
+    if named:
+        fits = [rm for rm in mine if set(named) <= room_mates(con, rm)]
+        if len(fits) == 1:
+            return fits[0]
+    sys.exit(f"coord: you are in several rooms ({', '.join(mine)}): add --room NAME to say which one this message is for.")
+
+
+def backfill_rooms(con):
+    """Assign a room to older messages: the sender's room at the time (none before they joined one);
+    for agents in several rooms, the one the recipients or the replied-to message imply. Ambiguous ones stay without a room."""
+    joins = {}
+    for m in con.execute("SELECT room, agent, joined FROM members ORDER BY joined"):
+        joins.setdefault(m["agent"], []).append((m["room"], m["joined"]))
+    mates = {}
+    for m in con.execute("SELECT room, agent FROM members"):
+        mates.setdefault(m["room"], set()).add(m["agent"])
+    known_rooms = {r["name"] for r in con.execute("SELECT name FROM rooms")}
+    got = {}
+    for r in con.execute("SELECT id, ts, sender, recipients, reply_to, subject FROM messages WHERE room IS NULL ORDER BY id").fetchall():
+        m = re.search(r"\broom (\S+)", r["subject"] or "")
+        if r["sender"] == "Admin" or re.search(r" joined room ", r["subject"] or ""):
+            if m and m.group(1) in known_rooms:
+                got[r["id"]] = m.group(1)
+            continue
+        js = joins.get(r["sender"]) or []
+        if not js:
+            continue
+        cand = [rm for rm, j in js if j <= r["ts"]]       # before the sender joined any room: no room
+        if len(cand) > 1:
+            try:
+                named = [x for x in json.loads(r["recipients"]) if x != "all"]
+            except ValueError:
+                named = []
+            fit = [rm for rm in cand if named and set(named) <= mates.get(rm, set())]
+            if len(fit) == 1:
+                cand = fit
+            elif r["reply_to"] in got and got[r["reply_to"]] in cand:
+                cand = [got[r["reply_to"]]]
+            else:                                         # still ambiguous: the room the sender joined most recently
+                cand = [max(((rm, j) for rm, j in js if j <= r["ts"]), key=lambda x: x[1])[0]]
+        if len(cand) == 1:
+            got[r["id"]] = cand[0]
+    con.executemany("UPDATE messages SET room=? WHERE id=?", [(v, k) for k, v in got.items()])
+    return len(got)
 
 
 def me(args):
@@ -176,9 +263,16 @@ def me(args):
     return name
 
 
-def addressed(row, agent):
+def addressed(row, agent, con=None):
     rec = json.loads(row["recipients"])
-    return "all" in rec or agent in rec
+    if agent in rec:
+        return True
+    if "all" not in rec:
+        return False
+    room = row["room"] if "room" in row.keys() else None
+    if not room or con is None:
+        return True
+    return agent in room_mates(con, room)              # "all" means everyone in the message's room
 
 
 def fmt(row, full=True):
@@ -236,8 +330,11 @@ def get_ask(con, mid):
     return con.execute("SELECT * FROM asks WHERE msg=?", (mid,)).fetchone()
 
 
-def eligible_agents(con, asker):
-    """Agents that can be asked: room mates of the asker, else the policy list."""
+def eligible_agents(con, asker, msg=None):
+    """Agents that can be asked: the question's room, else room mates of the asker, else the policy list."""
+    room = msg and (con.execute("SELECT room FROM messages WHERE id=?", (msg,)).fetchone() or [None])[0]
+    if room:
+        return sorted(room_mates(con, room) - {asker})
     mates = room_members(asker)
     if mates is None:
         pol = load_policy() or {}
@@ -273,8 +370,9 @@ def _set_ask(con, mid, **kw):
 
 
 def _ask_note(con, sender, to, kind, subject, summary, reply_to, body=""):
-    con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,reply_to,refs,summary) VALUES(?,?,?,?,?,?,?,?,?)",
-                (now(), sender, json.dumps(to), kind, subject, body, reply_to, "[]", summary))
+    con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,reply_to,refs,summary,room) "
+                "VALUES(?,?,?,?,?,?,?,?,?,(SELECT room FROM messages WHERE id=?))",   # same room as the question
+                (now(), sender, json.dumps(to), kind, subject, body, reply_to, "[]", summary, reply_to))
 
 
 def _load_live_ask(con, mid, agent):
@@ -295,7 +393,7 @@ def cmd_take(args):
         a = _load_live_ask(con, args.id, agent)
         if agent == a["asker"]:
             sys.exit("coord: you asked this question; use `coord close` to withdraw it.")
-        if a["status"] == "open" and agent not in eligible_agents(con, a["asker"]):
+        if a["status"] == "open" and agent not in eligible_agents(con, a["asker"], a["msg"]):
             sys.exit("coord: you are not in a room with the asker.")
         if a["status"] in ("assigned", "taken") and a["owner"] != agent:
             sys.exit(f"coord: ask #{args.id} belongs to {a['owner']}; you cannot take it.")
@@ -334,8 +432,8 @@ def cmd_propose(args):
         if target in passed:
             sys.exit(f"coord: refused. {target} already handed this question on; handing it back would be ping-pong. "
                      "Choose someone else, or answer it yourself.")
-        if target not in eligible_agents(con, a["asker"]):
-            sys.exit(f"coord: {target} is not an agent in the asker's room. Eligible: {', '.join(eligible_agents(con, a['asker']))}.")
+        if target not in eligible_agents(con, a["asker"], a["msg"]):
+            sys.exit(f"coord: {target} is not an agent in the asker's room. Eligible: {', '.join(eligible_agents(con, a['asker'], a['msg']))}.")
         _set_ask(con, args.id, status="assigned", owner=target, hops=a["hops"] + 1, passed=json.dumps(passed + [agent]))
         left = MAX_HOPS - a["hops"] - 1
         _ask_note(con, agent, [target], "request", f"Please answer #{args.id} (proposed by {agent})",
@@ -400,7 +498,7 @@ def owed_asks(con, agent):
     """Asks the agent must still act on: assigned/taken to it, plus unclaimed ones it could take."""
     mine = con.execute("SELECT * FROM asks WHERE owner=? AND status IN ('assigned','taken')", (agent,)).fetchall()
     openq = [r for r in con.execute("SELECT * FROM asks WHERE status='open' AND asker<>?", (agent,))
-             if agent in eligible_agents(con, r["asker"])]
+             if agent in eligible_agents(con, r["asker"], r["msg"])]
     return mine, openq
 
 
@@ -417,10 +515,15 @@ def cmd_post(args):
     rec = [r.strip() for r in args.to.split(",") if r.strip()] or ["all"]
     authorize(me(args), rec)
     con = connect()
+    room = pick_room(con, me(args), args.room, rec, args.reply_to)
+    if room:
+        outside = [r for r in rec if r != "all" and r not in room_mates(con, room)]
+        if outside:
+            sys.exit(f"coord: refused. {', '.join(outside)} not in room '{room}'.")
     cur = con.execute(
-        "INSERT INTO messages(ts,sender,recipients,kind,subject,body,reply_to,refs,summary) VALUES(?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO messages(ts,sender,recipients,kind,subject,body,reply_to,refs,summary,room) VALUES(?,?,?,?,?,?,?,?,?,?)",
         (now(), me(args), json.dumps(rec), args.kind, args.subject, body_from(args), args.reply_to,
-         json.dumps(args.ref or []), summary))
+         json.dumps(args.ref or []), summary, room))
     con.execute("INSERT OR IGNORE INTO reads(agent,msg,ts) VALUES(?,?,?)", (me(args), cur.lastrowid, now()))
     mid = cur.lastrowid
     if "all" in rec and not args.no_ask and (args.ask or args.kind == "request"):
@@ -429,7 +532,7 @@ def cmd_post(args):
         print(f"posted #{mid}: question to everyone. One agent must `coord take {mid}` (or `coord propose {mid} --agent NAME`); "
               f"at most {MAX_HOPS} handovers, then the holder answers or escalates to the user.")
     else:
-        print(f"posted #{mid}")
+        print(f"posted #{mid}" + (f" in room {room}" if room else ""))
     if args.reply_to:                                    # a reply from the owner (or first answerer) closes the ask
         a = get_ask(con, args.reply_to)
         if a and a["status"] in LIVE and me(args) != a["asker"] and args.kind in ("answer", "result"):
@@ -442,7 +545,7 @@ def unread(con, agent):
     rows = con.execute(
         "SELECT * FROM messages m WHERE sender<>? AND NOT EXISTS"
         " (SELECT 1 FROM reads r WHERE r.agent=? AND r.msg=m.id) ORDER BY id", (agent, agent)).fetchall()
-    return [r for r in rows if addressed(r, agent)]
+    return [r for r in rows if addressed(r, agent, con)]
 
 
 def cmd_inbox(args):
@@ -563,10 +666,10 @@ def cmd_claim(args):
             sys.exit(2)
         cur = con.execute("INSERT INTO claims(ts,agent,item,files,note) VALUES(?,?,?,?,?)",
                           (now(), agent, args.item, json.dumps(files), args.note or ""))
-        con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs) VALUES(?,?,?,?,?,?,?)",
+        con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs,room) VALUES(?,?,?,?,?,?,?,?)",
                     (now(), agent, json.dumps(["all"]), "claim-note", f"CLAIM #{cur.lastrowid}: {args.item}",
                      (args.note or "") + ("\n(forced despite conflict with " + ", ".join(f"#{c['id']}" for c in clash) + ")" if clash else ""),
-                     json.dumps(files)))
+                     json.dumps(files), own_room(con, agent)))
         con.execute("COMMIT")
         print(f"claim #{cur.lastrowid} recorded")
     except SystemExit:
@@ -586,8 +689,8 @@ def cmd_release(args):
     if c["agent"] != agent and not args.force:
         sys.exit(f"claim #{args.id} belongs to {c['agent']} (use --force only with their agreement)")
     con.execute("UPDATE claims SET released=? WHERE id=?", (now(), args.id))
-    con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs) VALUES(?,?,?,?,?,?,?)",
-                (now(), agent, json.dumps(["all"]), "claim-note", f"RELEASE #{args.id}: {c['item']}", args.note or "", "[]"))
+    con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs,room) VALUES(?,?,?,?,?,?,?,?)",
+                (now(), agent, json.dumps(["all"]), "claim-note", f"RELEASE #{args.id}: {c['item']}", args.note or "", "[]", own_room(con, agent)))
     print(f"claim #{args.id} released")
 
 
@@ -773,8 +876,8 @@ def cmd_join(args):
             con.execute("ROLLBACK")
         raise
     con.execute("INSERT OR IGNORE INTO members(room,agent,joined) VALUES(?,?,?)", (name, agent, now()))
-    con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs) VALUES(?,?,?,?,?,?,?)",
-                (now(), agent, json.dumps(["all"]), "info", f"{agent} joined room {name}", "", "[]"))
+    con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs,room) VALUES(?,?,?,?,?,?,?,?)",
+                (now(), agent, json.dumps(["all"]), "info", f"{agent} joined room {name}", "", "[]", name))
     print(f"{agent} joined room '{name}'.\n")
     print("From now on:")
     print(f"1. {stay_tuned(agent)}")
@@ -822,6 +925,7 @@ def main():
     s.add_argument("--summary", help="REQUIRED: 1-2 plain sentences (max 300 chars) saying what this message is about; it is what gets read aloud")
     s.add_argument("--body"); s.add_argument("--body-file")
     s.add_argument("--reply-to", type=int)
+    s.add_argument("--room", help="which room this message is for (needed only if you are in several and it is not implied)")
     s.add_argument("--ask", action="store_true", help="with --to all: someone must answer (automatic for --kind request)")
     s.add_argument("--no-ask", action="store_true", help="a request to all that needs no single answerer")
     s.add_argument("--ref", action="append", help="file path or artifact this message refers to (repeatable)")

@@ -90,6 +90,9 @@ bottom, or **↩ reply** on any message.
 - **Live messages** with no reloading. New messages appear as they are posted.
   If you are reading further up, the page stays put and the ⤓ button counts
   what is new.
+- **Rooms as tabs**: each room has its own tab with an unread count, plus
+  **All**. A tab shows only that room's conversation; search, statistics and
+  the writing box follow it.
 - **Navigation**: ⤒ first message, ↑ / ↓ how many messages are above and below,
   📅 jump to any day or hour, ⤓ latest. Click a day header to jump. Search
   (press `/`) covers the whole history.
@@ -138,6 +141,10 @@ coord post --reply-to 42 --to Bob --kind answer --subject "Re: ..." --summary ".
 ```
 
 Kinds: `info`, `request`, `result`, `answer`, `review`, `claim-note`.
+
+**Rooms.** Your messages go to your room. If you are in several rooms, add
+`--room NAME` when the recipients do not make it clear (you are told when it
+is needed). `--to all` means everyone in that room.
 
 **Acknowledge a request** addressed to you, so the sender knows you will act:
 

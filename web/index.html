@@ -129,6 +129,14 @@ body.nostats #wrap{grid-template-columns:minmax(0,980px)}body.nostats #stats,bod
 #adm .inv{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}#adm .pend{font-size:12px;color:var(--mut);margin:4px 0}
 #adm .pend span{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--bd);border-radius:10px;padding:0 8px;margin:2px 4px 2px 0}
 #adm .danger{margin-top:8px;font-size:12px;color:var(--mut)}#adm .danger button{font-size:12px}
+/* room tabs */
+#tabs{flex-basis:100%;display:flex;gap:2px;margin:2px -4px -8px;overflow-x:auto;scrollbar-width:none}
+#tabs button{border:none;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:none;padding:5px 12px 6px;font-size:13px;color:var(--mut);white-space:nowrap}
+#tabs button:hover{color:var(--fg);background:color-mix(in srgb,var(--acc) 6%,transparent)}
+#tabs button.on{color:var(--fg);border-bottom-color:var(--acc);font-weight:600}
+#tabs .badge{display:inline-block;min-width:18px;margin-left:6px;padding:0 6px;border-radius:9px;background:var(--acc);color:#fff;font-size:11px;font-weight:600;text-align:center}
+#tabs .mem{margin-left:6px;font-size:11px;color:var(--mut);font-weight:400}
+.rtag{border:1px solid var(--bd);border-radius:4px;padding:0 6px;font-size:11px}
 @media (max-width:600px){#q{width:100%}.top .tm{margin-left:0}}
 </style></head><body>
 <header><h1>Agent Chat</h1>
@@ -140,7 +148,8 @@ body.nostats #wrap{grid-template-columns:minmax(0,980px)}body.nostats #stats,bod
 <button id="statbtn" data-act="toggle-stats" title="Activity statistics">📊 Stats</button>
 <button id="admbtn" data-act="toggle-adm" hidden>Rooms</button>
 <a href="/admin" target="_blank" rel="noopener" title="all chats on this computer (admin password)"><button>⚙ Admin</button></a>
-<span id="conn" class="conn off" title="live connection to the server">connecting…</span><span id="stat"></span></header>
+<span id="conn" class="conn off" title="live connection to the server">connecting…</span><span id="stat"></span>
+<div id="tabs" role="tablist" aria-label="rooms"></div></header>
 <div id="stale" class="banner" hidden>This page is out of date. <button data-act="reload">Reload</button></div>
 <div id="unlock" class="banner" hidden>🔇 The browser blocks sound until you click on the page: click anywhere to enable it.</div>
 <div id="claims"></div>
@@ -227,7 +236,7 @@ function msgEl(m){
    <div class="msg${long?" collapsed":""}">
     <div class="top"><span class="who">${esc(m.sender)}</span><span>→ ${esc((m.recipients||[]).join(", "))}</span>
      <span class="kind k-${esc(m.kind)}">${esc(m.kind)}</span>
-     <span>#${m.id}${m.reply_to?` · reply to <a href="#" class="jump" data-id="${m.reply_to}">#${m.reply_to}</a>`:""}</span><span class="ticks"></span>${ADM?`<span class="rep" data-act="reply" data-id="${m.id}" title="reply to this message">↩ reply</span>`:""}
+     <span>#${m.id}${m.reply_to?` · reply to <a href="#" class="jump" data-id="${m.reply_to}">#${m.reply_to}</a>`:""}</span><span class="ticks"></span>${!CURROOM&&m.room?`<span class="rtag" title="room">${esc(m.room)}</span>`:""}${ADM?`<span class="rep" data-act="reply" data-id="${m.id}" title="reply to this message">↩ reply</span>`:""}
      <span class="tm" data-ts="${esc(m.ts)}" title="${esc(m.ts)}"></span></div>
     <div class="subj">${esc(m.subject)}</div><div class="askslot"></div>${m.summary?`<div class="sum">${esc(m.summary)}</div>`:""}
     <div class="body">${md(m.body||"")}</div>
@@ -243,9 +252,11 @@ function decorate(i){                 // day header, "N min later" gap, "new sin
   else{const g=(d-T(p.ts))/60000;if(g>=10)h+=`<div class="gap">— ${g<60?Math.round(g)+" min":(g/60).toFixed(1)+" h"} later —</div>`}
   if(id===firstUnseen)h+=`<div class="unseen">new since your last visit</div>`;
   it.el.querySelector(".pre").innerHTML=h}
-function audience(m){                 // who a message is for: its named recipients, or for "all" the sender's room mates
+function audience(m){                 // who a message is for: its named recipients, or for "all" everyone in its room
   const rec=(m.recipients||[]).filter(r=>r!=="all"&&r!==m.sender);
   if(rec.length&&!(m.recipients||[]).includes("all"))return rec;
+  const rm=m.room&&ROOMS.find(r=>r.name===m.room);
+  if(rm){const s=new Set(rm.members.map(x=>x.agent));rec.forEach(x=>s.add(x));s.delete(m.sender);s.delete("Admin");return [...s].sort()}
   let s=new Set(ROOMS.filter(r=>r.members.some(x=>x.agent===m.sender)).flatMap(r=>r.members.map(x=>x.agent)));
   if(!s.size)s=new Set(agentNames());                                     // sender in no room: everyone the page knows
   rec.forEach(x=>s.add(x));s.delete(m.sender);s.delete("Admin");return [...s].sort()}
@@ -290,6 +301,32 @@ function askBadge(a){
    escalated:`⚠ escalated to you — ${a.note||"nobody could answer"}`,closed:"closed by the asker"}[a.status]||a.status;
   return `<div class="ask ${esc(a.status)}" title="passed on by: ${esc((a.passed||[]).join(", ")||"nobody")}">${esc(txt)}</div>`}
 
+/* ---------- rooms: one tab per room ("" = all rooms, "_none" = messages without a room) ---------- */
+let CURROOM=ls("coordRoom")||"",UNREAD={},ROOMCOUNTS={};
+let SEENR={};try{SEENR=JSON.parse(ls("coordSeenRooms")||"{}")}catch(e){}
+const roomQ=()=>CURROOM?"&room="+encodeURIComponent(CURROOM):"";
+const roomOf=m=>m.room||"_none";
+const inRoom=m=>!CURROOM||roomOf(m)===CURROOM;
+function renderTabs(){
+  const names=ROOMS.map(r=>r.name),extra=(ROOMCOUNTS._none!==undefined||UNREAD._none)?["_none"]:[];
+  if(CURROOM&&CURROOM!=="_none"&&!names.includes(CURROOM)&&ROOMS.length)CURROOM="";   // the room was closed
+  const tab=(key,label,title)=>{const n=key?UNREAD[key]||0:Object.values(UNREAD).reduce((a,b)=>a+b,0);
+    return `<button role="tab" class="${key===CURROOM?"on":""}" data-act="room" data-room="${esc(key)}" title="${esc(title)}">${esc(label)}${n&&key!==CURROOM?`<span class="badge">${n}</span>`:""}</button>`};
+  $("tabs").innerHTML=(ROOMS.length?tab("","All","every room together"):"")+
+    ROOMS.map(r=>tab(r.name,r.name,`room ${r.name}: ${r.members.map(m=>m.agent).join(", ")||"no members"}`).replace("</button>",`<span class="mem">${r.members.length}</span></button>`)).join("")+
+    extra.map(k=>tab(k,"No room","messages from before rooms, or from agents not in a room")).join("");
+  $("tabs").hidden=!ROOMS.length}
+async function loadRoomCounts(){try{ROOMCOUNTS=await api("/api/roomcounts?seen="+encodeURIComponent(JSON.stringify(SEENR)));
+  for(const k in ROOMCOUNTS)if(k!==CURROOM)UNREAD[k]=ROOMCOUNTS[k];renderTabs()}catch(e){}}
+function seeRoom(){                     // the reader is at the newest message of this tab: its rooms are read
+  const keys=CURROOM?[CURROOM]:Object.keys(Object.assign({_none:0},Object.fromEntries(ROOMS.map(r=>[r.name,0]))));
+  if(keys.every(k=>(SEENR[k]||0)>=LIVEMAX&&!UNREAD[k]))return;            // nothing new: no work on every scroll
+  keys.forEach(k=>{SEENR[k]=LIVEMAX;UNREAD[k]=0});ls("coordSeenRooms",JSON.stringify(SEENR));renderTabs()}
+async function switchRoom(r){
+  if(r===CURROOM&&!SEARCHING){jumpLatest();return}
+  CURROOM=r;ls("coordRoom",r);if(SEARCHING)clearSearch();off.clear();KIND="";FOCUS_AGENT=null;CHIPSIG="";NEWCOUNT=0;
+  renderTabs();await loadWindow("","bottom");seeRoom();chips();applyFilters();composerRender();loadStats(true);if(!$("cal").hidden)calRender()}
+
 /* ---------- loading: one contiguous slice of the board, live at the newest end or anywhere in history ---------- */
 async function api(url){const r=await fetch(url);const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);if(j.stale)$("stale").hidden=false;return j}
 let BEFORE=0,AFTER=0,LIVEMAX=0;      // messages above / below the loaded slice; newest id already shown or announced
@@ -307,15 +344,15 @@ function clearList(){$("list").innerHTML="";ITEMS.clear();ORDER=[];TOPI=0}
 let LOADING_OLD=false,LOADING_NEW=false,WINDOWING=false,GEN=0;   // GEN changes whenever the slice is replaced: late replies for an old slice are dropped
 async function loadOlder(){
   if(LOADING_OLD||WINDOWING||!ORDER.length||BEFORE<=0)return false;LOADING_OLD=true;const g=GEN;
-  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&before=${ORDER[0]}&limit=150`);if(g!==GEN)return false;bounds(j);addOld(j.messages);BEFORE=j.messages.length?j.before:0;chips();return j.messages.length>0}
+  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&before=${ORDER[0]}&limit=150${roomQ()}`);if(g!==GEN)return false;bounds(j);addOld(j.messages);BEFORE=j.messages.length?j.before:0;chips();return j.messages.length>0}
   catch(e){return false}finally{LOADING_OLD=false;edges()}}
 async function loadNewer(){            // reading history: the next page down (old messages, never announced)
   if(LOADING_NEW||WINDOWING||TAIL()||!ORDER.length)return false;LOADING_NEW=true;const g=GEN;
-  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&after=${ORDER[ORDER.length-1]}&limit=150`);if(g!==GEN)return false;bounds(j);addNew(j.messages);AFTER=j.messages.length?j.after:0;chips();return j.messages.length>0}
+  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&after=${ORDER[ORDER.length-1]}&limit=150${roomQ()}`);if(g!==GEN)return false;bounds(j);addNew(j.messages);AFTER=j.messages.length?j.after:0;chips();return j.messages.length>0}
   catch(e){return false}finally{LOADING_NEW=false;edges()}}
 async function loadWindow(params,how){  // replace the slice. params: "around=ID" | "start=ID" | "at=TS" | "" (the newest); how: bottom|top|start|center
   WINDOWING=true;const g=++GEN;
-  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&limit=150${params?"&"+params:""}`);if(g!==GEN)return null;bounds(j);
+  try{const j=await api(`/api/messages?v=${PAGE_VERSION}&limit=150${params?"&"+params:""}${roomQ()}`);if(g!==GEN)return null;bounds(j);
     clearList();addNew(j.messages);BEFORE=j.before||0;AFTER=j.after||0;if(TAIL()){NEWCOUNT=0;LIVEMAX=Math.max(LIVEMAX,ORDER[ORDER.length-1]||0)}
     await fetchState();chips();edges();
     const t=j.target!=null?ITEMS.get(j.target):null;
@@ -330,18 +367,21 @@ async function fetchNew(){
   if(FETCHING){AGAIN=true;return}FETCHING=true;
   try{let more=true;
     while(more||AGAIN){AGAIN=false;
-      const j=await api(`/api/messages?v=${PAGE_VERSION}&after=${LIVEMAX}`);bounds(j);more=j.messages.length>=500;
+      const j=await api(`/api/messages?v=${PAGE_VERSION}&after=${LIVEMAX}`);more=j.messages.length>=500;   // all rooms: other tabs count them
       if(!j.messages.length)continue;
       LIVEMAX=j.messages[j.messages.length-1].id;
-      if(TAIL()){const near=nearBottom(),added=addNew(j.messages);if(added.length)onNew(added,near,false)}
-      else{AFTER+=j.messages.length;onNew(j.messages,false,true)}}}       // reading history: count and announce them; they appear on return
+      const here=j.messages.filter(inRoom),there=j.messages.filter(m=>!inRoom(m));
+      there.forEach(m=>{UNREAD[roomOf(m)]=(UNREAD[roomOf(m)]||0)+1});if(there.length){renderTabs();notify(there)}
+      TOTAL+=here.length;if(!here.length)continue;
+      if(TAIL()){const near=nearBottom(),added=addNew(here);if(added.length)onNew(added,near,false)}
+      else{AFTER+=here.length;onNew(here,false,true)}}}                  // reading history: count and announce them; they appear on return
   catch(e){setConn(false)}finally{FETCHING=false;edges()}}
 function onNew(added,wasNear,offscreen){
   chips();loadStats();
   if(!offscreen&&wasNear&&!SEARCHING)scrollBottom();else NEWCOUNT+=added.length;
   if(document.hidden){TITLE_UNREAD+=added.length;document.title=`(${TITLE_UNREAD}) Agent Chat`}
   markSeen();notify(added);navUpdate()}
-function markSeen(){if(TAIL()&&!document.hidden&&nearBottom()&&ORDER.length){lastSeen=Math.max(lastSeen,ORDER[ORDER.length-1]);ls("coordLastSeen",String(lastSeen))}}
+function markSeen(){if(TAIL()&&!document.hidden&&nearBottom()&&ORDER.length){lastSeen=Math.max(lastSeen,ORDER[ORDER.length-1]);ls("coordLastSeen",String(lastSeen));seeRoom()}}
 
 /* ---------- position: what is on screen, counts above/below, the date of what you are reading ---------- */
 let TOPI=0,NAVRAF=0,PILLT=null;
@@ -365,7 +405,7 @@ function showPill(){const p=$("datepill");if(SEARCHING||!ORDER.length)return;p.c
 
 async function fetchState(){
   try{const j=await api("/api/state?since="+(ORDER.length?ORDER[0]:0));
-    ASKS={};(j.asks||[]).forEach(a=>ASKS[a.msg]=a);ACKS=j.acks||{};READS=j.reads||{};CLAIMS=j.claims||[];ROOMS=j.rooms||[];
+    ASKS={};(j.asks||[]).forEach(a=>ASKS[a.msg]=a);ACKS=j.acks||{};READS=j.reads||{};CLAIMS=j.claims||[];ROOMS=j.rooms||[];renderTabs();
     if(j.version&&j.version!==PAGE_VERSION)$("stale").hidden=false;
     if(j.coord_cmd)COORD_CMD=j.coord_cmd;
     for(const [id,{m,el}] of ITEMS)hydrate(el,id,m);
@@ -399,7 +439,7 @@ let SEARCHING=false,SEARCH_T=null;const RESULTS=new Map();
 async function runSearch(){
   const q=$("q").value.trim();
   if(!q){SEARCHING=false;$("results").hidden=true;$("list").hidden=false;$("older").hidden=false;$("newer").hidden=false;$("results").innerHTML="";RESULTS.clear();navUpdate();return}
-  let j;try{j=await api("/api/search?q="+encodeURIComponent(q))}catch(e){return}
+  let j;try{j=await api("/api/search?q="+encodeURIComponent(q)+roomQ())}catch(e){return}
   if($("q").value.trim()!==q)return;                                     // a newer search is on its way
   SEARCHING=true;$("list").hidden=true;$("older").hidden=true;$("newer").hidden=true;const r=$("results");r.hidden=false;RESULTS.clear();navUpdate();
   r.innerHTML=`<div class="reshead">${j.messages.length}${j.messages.length>=200?"+":""} message${j.messages.length===1?"":"s"} in the whole history match “${esc(q)}”, newest first · <a href="#" data-act="clearsearch">back to the chat</a></div>`;
@@ -421,7 +461,7 @@ let CURDAY="",DAYS=null;
 async function calRender(){
   const c=$("cal");
   c.innerHTML=`<div class="ph"><b>Jump to a day or time</b><button data-act="close-panel" title="close">✕</button></div><div class="l">loading…</div>`;
-  try{DAYS=(await api("/api/days")).days}catch(e){c.querySelector(".l").textContent="Could not load the days: "+e.message;return}
+  try{DAYS=(await api("/api/days?"+roomQ().slice(1))).days}catch(e){c.querySelector(".l").textContent="Could not load the days: "+e.message;return}
   const now=new Date(),loc=new Date(now-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
   c.innerHTML=`<div class="ph"><b>Jump to a day or time</b><button data-act="close-panel" title="close">✕</button></div>
    <div class="go"><input type="datetime-local" id="cal-at" value="${esc(CURDAY?CURDAY+"T09:00":loc)}"> <button data-act="cal-go">Go</button>
@@ -542,11 +582,17 @@ function composerRender(focus){
      <span class="err" id="admerr">${ADM_BAD?"Your saved admin link is out of date: paste the current one.":""}</span>
      <div class="hintc">Or <a href="/admin" target="_blank" rel="noopener">sign in with the admin password</a> (one password for all chats on this computer). The link is printed when the chat server starts; ask any agent: <i>“give me the agent chat admin link”</i>. Keep it private.</div></div>`;return}
   if(!CMP.open){c.innerHTML=`<button class="open" data-act="cmp-open">✍ Write to the room…</button>`;return}
-  const names=agentNames().filter(n=>n!=="Admin"),me=ls("coordMe")||"User",keep=id=>{const e=$(id);return e?e.value:""};
+  const keep=id=>{const e=$(id);return e?e.value:""},me=ls("coordMe")||"User";
+  const real=CURROOM&&CURROOM!=="_none";                                    // in a room's tab the message goes to that room
+  CMP.room=real?CURROOM:(keep("cmp-room")||CMP.room||(ROOMS[0]||{}).name||"");
+  const rm=ROOMS.find(r=>r.name===CMP.room);
+  const names=(rm?rm.members.map(x=>x.agent):agentNames()).filter(n=>n!=="Admin");
+  CMP.to=new Set([...CMP.to].filter(n=>n==="all"||names.includes(n)));if(!CMP.to.size)CMP.to.add("all");
   const v={subject:keep("cmp-subject"),summary:keep("cmp-summary"),body:keep("cmp-body"),kind:keep("cmp-kind")||"info"};
   if(CMP.prefill){Object.assign(v,CMP.prefill);CMP.prefill=null}
   c.innerHTML=`<form id="cmp" autocomplete="off">
    <div class="r1">From <input type="text" id="cmp-me" value="${esc(me)}" size="10" style="width:auto">
+     ${ROOMS.length?(real?`in <b>${esc(CMP.room)}</b>`:`in <select id="cmp-room" data-act-change="cmp-room" title="which room this message is for">${ROOMS.map(r=>`<option${r.name===CMP.room?" selected":""}>${esc(r.name)}</option>`).join("")}</select>`):""}
      to <span class="to${CMP.to.has("all")?" on":""}" data-act="cmp-to" data-n="all">everyone</span>${names.map(n=>`<span class="to${CMP.to.has(n)?" on":""}" data-act="cmp-to" data-n="${esc(n)}">${esc(n)}</span>`).join("")}
      <select id="cmp-kind">${["info","request","answer","result","review"].map(k=>`<option${k===v.kind?" selected":""}>${k}</option>`).join("")}</select>
      ${CMP.reply?`<span>replying to <a href="#" class="jump" data-id="${CMP.reply}">#${CMP.reply}</a> <span class="x" data-act="cmp-noreply" style="cursor:pointer" title="not a reply">✕</span></span>`:""}
@@ -563,7 +609,7 @@ function composerRender(focus){
   if(focus)$(focus).focus()}
 async function composerSend(){
   const me=$("cmp-me").value.trim()||"User";ls("coordMe",me);
-  const d={sender:me,to:[...CMP.to],kind:$("cmp-kind").value,subject:$("cmp-subject").value,summary:$("cmp-summary").value,body:$("cmp-body").value,reply_to:CMP.reply};
+  const d={sender:me,room:CMP.room||"",to:[...CMP.to],kind:$("cmp-kind").value,subject:$("cmp-subject").value,summary:$("cmp-summary").value,body:$("cmp-body").value,reply_to:CMP.reply};
   try{const r=await fetch("/api/post",{method:"POST",headers:admHeaders(),body:JSON.stringify(d)});
     const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);
     CMP.open=false;CMP.reply=null;CMP.preview=false;stopDictation();composerRender();await fetchNew();scrollBottom()}
@@ -587,7 +633,7 @@ let STATWIN=ls("coordStatWin")||"24h",STATS=null,STAT_T=0,STAT_PENDING=false,FOC
 async function loadStats(force){
   if(!force&&Date.now()-STAT_T<8000){if(!STAT_PENDING){STAT_PENDING=true;setTimeout(()=>{STAT_PENDING=false;loadStats(true)},8000-(Date.now()-STAT_T))}return}
   STAT_T=Date.now();
-  try{STATS=await api("/api/stats?window="+encodeURIComponent(STATWIN));renderStats()}
+  try{STATS=await api("/api/stats?window="+encodeURIComponent(STATWIN)+roomQ());renderStats()}
   catch(e){if(!STATS)$("stats").innerHTML=`<div class="card"><h3>Statistics</h3><div class="l">Could not load the statistics (${esc(e.message)}).</div><button data-act="stats-retry">Retry</button></div>`}}
 const ago=ts=>{const s=(Date.now()-T(ts))/1000;return s<90?"just now":s<3600?Math.round(s/60)+" min ago":s<86400?(s/3600).toFixed(s<36000?1:0)+" h ago":Math.round(s/86400)+" d ago"};
 const winName={"1h":"last hour","24h":"last 24 h","7d":"last 7 days","all":"all time"};
@@ -687,6 +733,7 @@ document.addEventListener("click",e=>{
   const act=a.dataset.act,ag=a.dataset.agent,room=a.dataset.room;
   if(act==="more"){const m=a.closest(".msg");m.classList.toggle("collapsed");a.textContent=m.classList.contains("collapsed")?"show more":"show less"}
   else if(act==="older")loadOlder();
+  else if(act==="room")switchRoom(a.dataset.room);
   else if(act==="cmp-open"){CMP.open=true;composerRender("cmp-subject")}
   else if(act==="adm-link"){const v=($("admlink").value||"").trim(),m=v.match(/admin=([\w-]+)/);useAdmin(m?m[1]:v)}
   else if(act==="cmp-close"){CMP.open=false;CMP.reply=null;stopDictation();composerRender()}
@@ -696,6 +743,7 @@ document.addEventListener("click",e=>{
   else if(act==="cmp-mic")dictate();
   else if(act==="reply"){const it=ITEMS.get(+a.dataset.id)||{m:RESULTS.get(+a.dataset.id)};const m=it.m;if(!m)return;
     if(SEARCHING)clearSearch();CMP.open=true;CMP.reply=m.id;CMP.to=new Set([m.sender]);
+    if(m.room){CMP.room=m.room;const sel=$("cmp-room");if(sel)sel.value=m.room}           // a reply stays in its room
     CMP.prefill={subject:"Re: "+m.subject.replace(/^Re:\s*/i,""),kind:m.kind==="request"?"answer":"info"};composerRender("cmp-body")}
   else if(act==="newer")loadNewer();
   else if(act==="nav-first"){e.preventDefault();$("cal").hidden=true;jumpFirst()}
@@ -738,6 +786,7 @@ document.addEventListener("change",e=>{const t=e.target,d=t.dataset;
   else if(d.mute!==undefined){const n=d.mute;SET.muted=SET.muted.filter(x=>x!==n);if(t.checked)SET.muted.push(n);saveSet()}
   else if(d.voice!==undefined)setVoice(d.voice,t.value);
   else if(t.id==="kind"){KIND=t.value;chips();applyFilters()}
+  else if(t.id==="cmp-room"){CMP.room=t.value;CMP.to=new Set(["all"]);composerRender()}
   else if(t.id==="abs")document.querySelectorAll(".tm").forEach(setTime)});
 document.addEventListener("input",e=>{const t=e.target,d=t.dataset;
   if(d.set==="vol"){SET.vol=+t.value;AUD.volume=SET.vol;saveSet()}
@@ -764,14 +813,18 @@ async function init(){
   saveSet();setHdr();composerRender();                                    // drawn first: its height must not push the view off the bottom later
   for(let n=0;!LOADED;n++){
     try{
-      const j=await api(`/api/messages?v=${PAGE_VERSION}&limit=150`);bounds(j);
+      const j=await api(`/api/messages?v=${PAGE_VERSION}&limit=150${roomQ()}`);bounds(j);
       const ms=j.messages;firstUnseen=lastSeen?(ms.find(m=>m.id>lastSeen)||{}).id||null:null;
-      ANNOUNCE_AFTER=j.last||0;LIVEMAX=j.last||0;BEFORE=j.before||0;AFTER=0;LOADED=true;
+      ANNOUNCE_AFTER=j.last||0;BEFORE=j.before||0;AFTER=0;LOADED=true;
+      LIVEMAX=ms.length?ms[ms.length-1].id:0;                             // newest in this tab; fetchNew catches up on all rooms
       addNew(ms);await fetchState();edges();chips();scrollBottom();markSeen();   // state after the messages: it asks only for their read receipts
     }catch(e){$("older").textContent="Cannot reach the server, retrying… ("+e.message+")";setConn(false);await sleep(Math.min(10000,1500*(n+1)))}}
   let READY=false;setTimeout(()=>READY=true,500);                        // not before the first scroll to the bottom
   new IntersectionObserver(es=>{if(READY&&es.some(x=>x.isIntersecting)&&!SEARCHING)loadOlder()}).observe($("older"));   // reaching the top loads more
   new IntersectionObserver(es=>{if(READY&&es.some(x=>x.isIntersecting)&&!SEARCHING&&!TAIL())loadNewer()}).observe($("newer"));
+  {const all=await api(`/api/messages?v=${PAGE_VERSION}&limit=1`);LIVEMAX=Math.max(LIVEMAX,all.last||0);ANNOUNCE_AFTER=Math.max(ANNOUNCE_AFTER,all.last||0);
+   if(!ls("coordSeenRooms")){SEENR={_none:all.last||0};ROOMS.forEach(r=>SEENR[r.name]=all.last||0);ls("coordSeenRooms",JSON.stringify(SEENR))}}
+  loadRoomCounts();
   connectStream();loadVoices();
   if(ADM&&(await checkAdmin(ADM))===false){ls("coordAdm","");ADM="";ADM_BAD=true;$("admbtn").hidden=true;relinkAll()}   // a token from an older server start
   if(!ADM){try{const w=await (await fetch("/api/whoami")).json();if(w.admin){ADM="session";ADM_BAD=false;$("admbtn").hidden=false;relinkAll()}}catch(e){}}   // signed in on /admin

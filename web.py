@@ -273,9 +273,18 @@ def resolve(rel):
     return os.path.join(ROOT, sorted(hits, key=len)[0]) if hits else None
 
 
-def db():
+def db(room=None):
+    """Read-only connection. 'msgs' is the messages of one room (room name, '_none' for messages without a room) or of all."""
     con = sqlite3.connect("file:%s?mode=ro" % db_path(), uri=True, timeout=5)
     con.row_factory = sqlite3.Row
+    has_room = "room" in {r[1] for r in con.execute("PRAGMA table_info(messages)")}
+    if room and has_room and room == "_none":
+        where = "WHERE room IS NULL"
+    elif room and has_room and NAME_RE.match(room):
+        where = "WHERE room='%s'" % room.replace("'", "''")
+    else:
+        where = ""
+    con.execute("CREATE TEMP VIEW msgs AS SELECT * FROM messages " + where)
     return con
 
 
@@ -317,7 +326,7 @@ def _msgs(con, rows):
 
 
 def _bounds(con):
-    r = con.execute("SELECT min(id), max(id), count(*) FROM messages").fetchone()
+    r = con.execute("SELECT min(id), max(id), count(*) FROM msgs").fetchone()
     return {"first": r[0] or 0, "last": r[1] or 0, "total": r[2]}
 
 
@@ -327,43 +336,43 @@ def messages(q):
     around=ID centred on a message | at='YYYY-MM-DD HH:MM' starting at the first message from that time.
     'before'/'after' in the reply count the messages outside the slice, 'target' is the message to show."""
     limit = max(1, min(int(q.get("limit", ["150"])[0]), 500))
-    con = db()
+    con = db(q.get("room", [""])[0])
     try:
         extra = {}
         if "after" in q:
-            rows = con.execute("SELECT * FROM messages WHERE id>? ORDER BY id LIMIT ?", (int(q["after"][0]), int(q.get("limit", ["500"])[0]) if "limit" in q else 500)).fetchall()
+            rows = con.execute("SELECT * FROM msgs WHERE id>? ORDER BY id LIMIT ?", (int(q["after"][0]), int(q.get("limit", ["500"])[0]) if "limit" in q else 500)).fetchall()
         elif "before" in q:
-            rows = con.execute("SELECT * FROM messages WHERE id<? ORDER BY id DESC LIMIT ?", (int(q["before"][0]), limit)).fetchall()[::-1]
+            rows = con.execute("SELECT * FROM msgs WHERE id<? ORDER BY id DESC LIMIT ?", (int(q["before"][0]), limit)).fetchall()[::-1]
         elif "start" in q:
-            rows = con.execute("SELECT * FROM messages WHERE id>=? ORDER BY id LIMIT ?", (int(q["start"][0]), limit)).fetchall()
+            rows = con.execute("SELECT * FROM msgs WHERE id>=? ORDER BY id LIMIT ?", (int(q["start"][0]), limit)).fetchall()
             extra["target"] = rows[0]["id"] if rows else None
         elif "around" in q or "at" in q:
             if "at" in q:
-                pivot = con.execute("SELECT min(id) FROM messages WHERE ts>=?", (q["at"][0][:19],)).fetchone()[0]
-                pivot = pivot if pivot is not None else (con.execute("SELECT max(id) FROM messages").fetchone()[0] or 0)
+                pivot = con.execute("SELECT min(id) FROM msgs WHERE ts>=?", (q["at"][0][:19],)).fetchone()[0]
+                pivot = pivot if pivot is not None else (con.execute("SELECT max(id) FROM msgs").fetchone()[0] or 0)
                 n_before = min(30, limit // 4)          # a little context above the chosen moment
             else:
                 pivot, n_before = int(q["around"][0]), limit // 2
-            older = con.execute("SELECT * FROM messages WHERE id<? ORDER BY id DESC LIMIT ?", (pivot, n_before)).fetchall()[::-1]
-            newer = con.execute("SELECT * FROM messages WHERE id>=? ORDER BY id LIMIT ?", (pivot, limit - len(older))).fetchall()
+            older = con.execute("SELECT * FROM msgs WHERE id<? ORDER BY id DESC LIMIT ?", (pivot, n_before)).fetchall()[::-1]
+            newer = con.execute("SELECT * FROM msgs WHERE id>=? ORDER BY id LIMIT ?", (pivot, limit - len(older))).fetchall()
             rows = older + newer
             extra["target"] = newer[0]["id"] if newer else (older[-1]["id"] if older else None)
         else:
-            rows = con.execute("SELECT * FROM messages ORDER BY id DESC LIMIT ?", (limit,)).fetchall()[::-1]
+            rows = con.execute("SELECT * FROM msgs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()[::-1]
         if rows:
-            extra["before"] = con.execute("SELECT count(*) FROM messages WHERE id<?", (rows[0]["id"],)).fetchone()[0]
-            extra["after"] = con.execute("SELECT count(*) FROM messages WHERE id>?", (rows[-1]["id"],)).fetchone()[0]
+            extra["before"] = con.execute("SELECT count(*) FROM msgs WHERE id<?", (rows[0]["id"],)).fetchone()[0]
+            extra["after"] = con.execute("SELECT count(*) FROM msgs WHERE id>?", (rows[-1]["id"],)).fetchone()[0]
         return dict(_bounds(con), messages=_msgs(con, rows), **extra)
     finally:
         con.close()
 
 
-def days():
+def days(room=""):
     """Messages per day and per hour, newest day first, for the date navigator."""
-    con = db()
+    con = db(room)
     try:
         out = {}
-        for d, h, n, first in con.execute("SELECT substr(ts,1,10), substr(ts,12,2), count(*), min(id) FROM messages GROUP BY 1, 2"):
+        for d, h, n, first in con.execute("SELECT substr(ts,1,10), substr(ts,12,2), count(*), min(id) FROM msgs GROUP BY 1, 2"):
             day = out.setdefault(d, {"day": d, "n": 0, "first": first, "hours": [0] * 24})
             day["n"] += n
             day["first"] = min(day["first"], first)
@@ -374,12 +383,12 @@ def days():
         con.close()
 
 
-def search(text):
-    con = db()
+def search(text, room=""):
+    con = db(room)
     try:
         cols = {r[1] for r in con.execute("PRAGMA table_info(messages)")}
         hay = "subject||' '||body||' '||sender" + ("||' '||summary" if "summary" in cols else "")
-        rows = con.execute(f"SELECT * FROM messages WHERE instr(lower({hay}), lower(?))>0 ORDER BY id DESC LIMIT 200",
+        rows = con.execute(f"SELECT * FROM msgs WHERE instr(lower({hay}), lower(?))>0 ORDER BY id DESC LIMIT 200",
                            (text,)).fetchall()
         return {"messages": _msgs(con, rows), "query": text}
     finally:
@@ -423,23 +432,23 @@ WINDOWS = {"1h": 1, "24h": 24, "7d": 168, "all": None}
 STAT_KINDS = ["result", "request", "answer", "review"]          # everything else counts as "other"
 
 
-def stats(window):
+def stats(window, room=""):
     """Activity figures for the side panel. Timestamps are stored as local 'YYYY-MM-DD HH:MM:SS', so they compare as text."""
     now = datetime.now()
     at = lambda **kw: (now - timedelta(**kw)).strftime("%Y-%m-%d %H:%M:%S")
     hours = WINDOWS.get(window, 24)
     cut = at(hours=hours) if hours else "0000"
-    con = db()
+    con = db(room)
     try:
         one = lambda sql, *p: con.execute(sql, p).fetchone()[0]
-        pace = {"last60": one("SELECT count(*) FROM messages WHERE ts>=?", at(hours=1)),
-                "prev60": one("SELECT count(*) FROM messages WHERE ts>=? AND ts<?", at(hours=2), at(hours=1)),
-                "last10": one("SELECT count(*) FROM messages WHERE ts>=?", at(minutes=10)),
-                "total": one("SELECT count(*) FROM messages"),
-                "window": one("SELECT count(*) FROM messages WHERE ts>=?", cut)}
+        pace = {"last60": one("SELECT count(*) FROM msgs WHERE ts>=?", at(hours=1)),
+                "prev60": one("SELECT count(*) FROM msgs WHERE ts>=? AND ts<?", at(hours=2), at(hours=1)),
+                "last10": one("SELECT count(*) FROM msgs WHERE ts>=?", at(minutes=10)),
+                "total": one("SELECT count(*) FROM msgs"),
+                "window": one("SELECT count(*) FROM msgs WHERE ts>=?", cut)}
         start = (now - timedelta(hours=23)).replace(minute=0, second=0, microsecond=0)   # 24 hourly bars, the last one is the current hour
         bins = [0] * 24
-        for (ts,) in con.execute("SELECT ts FROM messages WHERE ts>=?", (start.strftime("%Y-%m-%d %H:%M:%S"),)):
+        for (ts,) in con.execute("SELECT ts FROM msgs WHERE ts>=?", (start.strftime("%Y-%m-%d %H:%M:%S"),)):
             try:
                 i = int((datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S") - start).total_seconds() // 3600)
             except ValueError:
@@ -448,11 +457,11 @@ def stats(window):
                 bins[i] += 1
         hourly = [{"hour": (start + timedelta(hours=i)).strftime("%Y-%m-%d %H:00"), "n": n} for i, n in enumerate(bins)]
         agents = {}
-        for sender, kind, n in con.execute("SELECT sender, kind, count(*) FROM messages WHERE ts>=? AND sender<>'Admin' GROUP BY sender, kind", (cut,)):
+        for sender, kind, n in con.execute("SELECT sender, kind, count(*) FROM msgs WHERE ts>=? AND sender<>'Admin' GROUP BY sender, kind", (cut,)):
             a = agents.setdefault(sender, {"agent": sender, "total": 0, "kinds": dict.fromkeys(STAT_KINDS + ["other"], 0)})
             a["total"] += n
             a["kinds"][kind if kind in STAT_KINDS else "other"] += n
-        for sender, last in con.execute("SELECT sender, max(ts) FROM messages WHERE sender<>'Admin' GROUP BY sender"):
+        for sender, last in con.execute("SELECT sender, max(ts) FROM msgs WHERE sender<>'Admin' GROUP BY sender"):
             if sender in agents:
                 agents[sender]["last"] = last
         claims = {}
@@ -464,7 +473,7 @@ def stats(window):
         # how fast requests get a first response (a reply or an ack)
         waits, unanswered = [], 0
         for ts, first in con.execute("SELECT m.ts, (SELECT min(t) FROM (SELECT r.ts AS t FROM messages r WHERE r.reply_to=m.id "
-                                     "UNION ALL SELECT k.ts FROM acks k WHERE k.msg=m.id)) FROM messages m "
+                                     "UNION ALL SELECT k.ts FROM acks k WHERE k.msg=m.id)) FROM msgs m "
                                      "WHERE m.kind='request' AND m.ts>=?", (cut,)):   # first reply or acknowledgement
             if first:
                 try:
@@ -478,11 +487,26 @@ def stats(window):
         try:
             asks = [dict(r) for r in con.execute(
                 "SELECT a.msg, a.status, a.owner, a.asker, a.created, m.subject FROM asks a LEFT JOIN messages m ON m.id=a.msg "
-                "WHERE a.status IN ('open','assigned','taken','escalated') ORDER BY (a.status='escalated') DESC, a.created")]
+                "WHERE a.status IN ('open','assigned','taken','escalated') AND a.msg IN (SELECT id FROM msgs) ORDER BY (a.status='escalated') DESC, a.created")]
         except sqlite3.OperationalError:
             asks = []
         return {"window": window if window in WINDOWS else "24h", "now": now.strftime("%Y-%m-%d %H:%M:%S"),
                 "pace": pace, "hourly": hourly, "agents": board, "replies": replies, "asks": asks}
+    finally:
+        con.close()
+
+
+def room_counts(seen):
+    """seen: {room or '_none': last id the reader has seen} -> {room: messages after it}."""
+    con = db()
+    try:
+        if "room" not in {r[1] for r in con.execute("PRAGMA table_info(messages)")}:
+            return {}
+        out = {}
+        for room, last in con.execute("SELECT coalesce(room,'_none'), max(id) FROM messages GROUP BY 1"):
+            out[room] = con.execute("SELECT count(*) FROM messages WHERE coalesce(room,'_none')=? AND id>?",
+                                    (room, int(seen.get(room, 0) or 0))).fetchone()[0]
+        return out
     finally:
         con.close()
 
@@ -506,8 +530,8 @@ def admin(action, d):
     con = coord.connect()
     room, agent = str(d.get("room", "")).strip(), str(d.get("agent", "")).strip()
     note = lambda subj: con.execute(
-        "INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs) VALUES(?,?,?,?,?,?,?)",
-        (coord.now(), "Admin", json.dumps(["all"]), "info", subj, "", "[]"))
+        "INSERT INTO messages(ts,sender,recipients,kind,subject,body,refs,room) VALUES(?,?,?,?,?,?,?,?)",
+        (coord.now(), "Admin", json.dumps(["all"]), "info", subj, "", "[]", room or None))
     if not NAME_RE.match(room) or ":" in room:
         raise ValueError("bad room name")
     exists = con.execute("SELECT 1 FROM rooms WHERE name=?", (room,)).fetchone()
@@ -560,8 +584,11 @@ def user_post(d):
     body = str(d.get("body") or "")[:100000]
     reply_to = int(d["reply_to"]) if str(d.get("reply_to") or "").isdigit() else None
     con = coord.connect()
-    cur = con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,reply_to,refs,summary) VALUES(?,?,?,?,?,?,?,?,?)",
-                      (coord.now(), sender, json.dumps(rec), kind, subject, body, reply_to, "[]", summary))
+    room = str(d.get("room") or "").strip() or None
+    if room and not con.execute("SELECT 1 FROM rooms WHERE name=?", (room,)).fetchone():
+        raise ValueError("no such room")
+    cur = con.execute("INSERT INTO messages(ts,sender,recipients,kind,subject,body,reply_to,refs,summary,room) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                      (coord.now(), sender, json.dumps(rec), kind, subject, body, reply_to, "[]", summary, room))
     mid = cur.lastrowid
     con.execute("INSERT OR IGNORE INTO reads(agent,msg,ts) VALUES(?,?,?)", (sender, mid, coord.now()))
     if "all" in rec and (kind == "request" or d.get("ask")):          # a question to everyone: one agent must take it
@@ -638,14 +665,17 @@ class H(BaseHTTPRequestHandler):
                     return self.json({"messages": [], "claims": [], "rooms": [], "asks": [], "first": 0, "last": 0,
                                       "total": 0, "stale": "This page is out of date: reload it."})
                 return self.json(messages(q))
+            room = q.get("room", [""])[0]
             if u.path == "/api/days":
-                return self.json(days())
+                return self.json(days(room))
             if u.path == "/api/search":
-                return self.json(search(q.get("q", [""])[0][:200]))
+                return self.json(search(q.get("q", [""])[0][:200], room))
+            if u.path == "/api/roomcounts":
+                return self.json(room_counts(json.loads(q.get("seen", ["{}"])[0] or "{}")))
             if u.path == "/api/state":
                 return self.json(state(int(q.get("since", ["0"])[0] or 0)))
             if u.path == "/api/stats":
-                return self.json(stats(q.get("window", ["24h"])[0]))
+                return self.json(stats(q.get("window", ["24h"])[0], room))
             if u.path == "/api/stream":
                 return self.stream()
             if u.path == "/api/voices":
